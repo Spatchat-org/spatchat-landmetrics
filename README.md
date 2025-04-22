@@ -4,10 +4,12 @@ emoji: 🌲
 colorFrom: green
 colorTo: blue
 sdk: gradio
-sdk_version: "5.25.2"
+sdk_version: 5.25.2
 app_file: app.py
-pinned: false
+pinned: true
 license: mit
+thumbnail: >-
+  https://cdn-uploads.huggingface.co/production/uploads/68070e2c824e76650eef5f17/P5dHuiH-HeNjbaPFGJkU7.png
 ---
 
 # 🌲 Spatchat: Conversational Spatial Intelligence
