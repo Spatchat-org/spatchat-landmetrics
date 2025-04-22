@@ -1,3 +1,15 @@
+---
+title: Spatchat
+emoji: 🌲
+colorFrom: green
+colorTo: teal
+sdk: gradio
+sdk_version: "5.25.2"
+app_file: app.py
+pinned: false
+license: mit
+---
+
 # 🌲 Spatchat: Conversational Spatial Intelligence
 
 **Spatchat** is an open-source platform for AI-powered spatial modeling and analysis.  
