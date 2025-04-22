@@ -83,7 +83,7 @@ def analyze_raster(file, question, history):
             "If no raster is uploaded, do not attempt to calculate anything.\n"
             "If a raster is uploaded and the user asks for a metric, use pylandstats to calculate it.\n"
             "You can calculate patch metrics, class metrics, and landscape metrics using pylandstats.\n"
-            "If the user asks you to 
+            "If the user asks you to calculate a metric or multiple metrics, display the results clearly. You do not need to provide detailed explanations.\n"
             "Be conversational and helpful. If the question is vague, ask the user to clarify."
         )},
         *history,
