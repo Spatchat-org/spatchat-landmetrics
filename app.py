@@ -131,9 +131,9 @@ def analyze_raster(file, question, history):
 # --- UI layout ---
 with gr.Blocks(title="Spatchat") as iface:
     gr.HTML("""
-        <head><link rel="icon" type="image/png" href="file=logo\logo1.png"></head>
+        <head><link rel="icon" type="image/png" href="file=logo/logo1.png"></head>
     """)
-    gr.Image(value="logo\logo_long1.png", width=20, show_label=False, show_download_button=False)
+    gr.Image(value="logo/logo_long1.png", width=20, show_label=False, show_download_button=False)
     gr.Markdown("## 🌲 Spatchat: Landscape Metric Assistant")
 
     with gr.Row():
