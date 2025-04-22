@@ -1,0 +1,540 @@
+total_area:
+  name: Total Area
+  category: Area / Density / Edge
+  level: Class / Landscape
+  definition: >
+    The total area of all patches of a given class or the entire landscape.
+  units: hectares (ha)
+  interpretation: >
+    Indicates the extent of the landscape or of a particular patch type.
+  formula: Sum of all patch areas
+  source: FRAGSTATS
+
+number_of_patches:
+  name: Number of Patches
+  category: Area / Density / Edge
+  level: Class / Landscape
+  definition: >
+    The total count of discrete patches in a landscape or for a given patch type.
+  units: unitless
+  interpretation: >
+    Indicates fragmentation; higher numbers suggest more fragmentation.
+  formula: Count of patches
+  source: FRAGSTATS
+
+patch_density:
+  name: Patch Density
+  category: Area / Density / Edge
+  level: Landscape
+  definition: >
+    The number of patches per 100 hectares.
+  units: patches per 100 hectares
+  interpretation: >
+    Standardized measure of patch frequency. Higher values indicate a more fragmented landscape.
+  formula: Number of patches / total landscape area * 10,000
+  source: FRAGSTATS
+
+mean_patch_area:
+  name: Mean Patch Area
+  category: Area / Density / Edge
+  level: Class
+  definition: >
+    The average area of patches.
+  units: hectares (ha)
+  interpretation: >
+    Indicates typical patch size; complements patch density.
+  formula: Total area / number of patches
+  source: FRAGSTATS
+
+area_weighted_mean_patch_area:
+  name: Area-Weighted Mean Patch Area
+  category: Area / Density / Edge
+  level: Class
+  definition: >
+    A weighted average patch size, giving more influence to larger patches.
+  units: hectares (ha)
+  interpretation: >
+    Helps identify dominance by large patches.
+  formula: Sum(patch area²) / total patch area
+  source: FRAGSTATS
+
+largest_patch_index:
+  name: Largest Patch Index
+  category: Area / Density / Edge
+  level: Landscape
+  definition: >
+    The percentage of total landscape area comprised by the largest patch.
+  units: percent (%)
+  interpretation: >
+    Indicates dominance and fragmentation. Higher values suggest lower fragmentation.
+  formula: (Area of largest patch / total landscape area) * 100
+  source: FRAGSTATS
+
+total_edge:
+  name: Total Edge
+  category: Area / Density / Edge
+  level: Class / Landscape
+  definition: >
+    The sum of all edge lengths in the landscape.
+  units: meters (m)
+  interpretation: >
+    Indicates edge abundance. Higher values often relate to fragmentation.
+  formula: Sum of all patch perimeters
+  source: FRAGSTATS
+
+edge_density:
+  name: Edge Density
+  category: Area / Density / Edge
+  level: Landscape
+  definition: >
+    The total edge length per unit area.
+  units: meters per hectare (m/ha)
+  interpretation: >
+    A fragmentation metric. Higher values = more patch edge per unit area.
+  formula: Total edge / total landscape area
+  source: FRAGSTATS
+
+mean_patch_edge:
+  name: Mean Patch Edge
+  category: Area / Density / Edge
+  level: Class
+  definition: >
+    The average perimeter of patches.
+  units: meters (m)
+  interpretation: >
+    Indicates average boundary complexity.
+  formula: Total edge / number of patches
+  source: FRAGSTATS
+
+edge_density_index:
+  name: Edge Density Index
+  category: Area / Density / Edge
+  level: Class
+  definition: >
+    Same as edge density but used at the class level.
+  units: meters per hectare (m/ha)
+  interpretation: >
+    Quantifies fragmentation for specific patch types.
+  formula: Total edge of class / total landscape area
+  source: FRAGSTATS
+
+mean_shape_index:
+  name: Mean Shape Index
+  category: Shape
+  level: Class
+  definition: >
+    The average shape index of all patches in a class, where shape index measures how complex a patch’s shape is compared to a square.
+  units: unitless
+  interpretation: >
+    Higher values indicate more complex patch shapes; a square has a shape index of 1.
+  formula: Mean of (patch perimeter / minimum perimeter for square of same area)
+  source: FRAGSTATS
+
+area_weighted_mean_shape_index:
+  name: Area-Weighted Mean Shape Index
+  category: Shape
+  level: Class
+  definition: >
+    A mean shape index that gives more weight to larger patches.
+  units: unitless
+  interpretation: >
+    Highlights shape complexity of dominant patches.
+  formula: Weighted mean of (shape index × patch area)
+  source: FRAGSTATS
+
+landscape_shape_index:
+  name: Landscape Shape Index
+  category: Shape
+  level: Landscape
+  definition: >
+    Quantifies overall landscape shape complexity relative to a maximally compact shape.
+  units: unitless
+  interpretation: >
+    Higher values mean a more irregular and fragmented landscape.
+  formula: (Total edge / minimum edge for a maximally compact landscape) * scaling constant
+  source: FRAGSTATS
+
+fractal_dimension_index:
+  name: Fractal Dimension Index
+  category: Shape
+  level: Class / Landscape
+  definition: >
+    Measures the complexity of patch shape based on perimeter-to-area ratio using a fractal formula.
+  units: unitless (range: 1–2)
+  interpretation: >
+    Values closer to 2 represent more complex, irregular patch shapes.
+  formula: 2 × ln(0.25 × perimeter) / ln(area)
+  source: FRAGSTATS
+
+mean_fractal_dimension_index:
+  name: Mean Fractal Dimension Index
+  category: Shape
+  level: Class
+  definition: >
+    The average fractal dimension of all patches in a class.
+  units: unitless (range: 1–2)
+  interpretation: >
+    Provides insight into typical shape complexity within a patch class.
+  formula: Mean of 2 × ln(0.25 × perimeter) / ln(area)
+  source: FRAGSTATS
+
+area_weighted_mean_fractal_dimension_index:
+  name: Area-Weighted Mean Fractal Dimension Index
+  category: Shape
+  level: Class
+  definition: >
+    Area-weighted mean of fractal dimension across all patches in a class.
+  units: unitless
+  interpretation: >
+    Places more emphasis on larger patches when evaluating shape complexity.
+  formula: Weighted mean of patch fractal dimension by area
+  source: FRAGSTATS
+
+perimeter_area_ratio:
+  name: Perimeter-Area Ratio
+  category: Shape
+  level: Patch / Class
+  definition: >
+    Ratio of perimeter to area for a patch or averaged over all patches in a class.
+  units: meters per hectare
+  interpretation: >
+    Higher values suggest elongated or complex shapes.
+  formula: Perimeter / Area
+  source: FRAGSTATS
+
+shape_index:
+  name: Shape Index
+  category: Shape
+  level: Patch
+  definition: >
+    A normalized perimeter-area ratio comparing a patch to a square.
+  units: unitless
+  interpretation: >
+    A square has an index of 1; more irregular shapes have higher values.
+  formula: Perimeter / (2 × sqrt(pi × area))
+  source: FRAGSTATS
+
+total_core_area:
+  name: Total Core Area
+  category: Core Area
+  level: Class / Landscape
+  definition: >
+    The total interior area of all patches after applying a user-defined edge depth buffer.
+  units: hectares (ha)
+  interpretation: >
+    Indicates the availability of habitat not affected by edge effects. Larger total core area is better for edge-sensitive species.
+  formula: Sum of all core areas (i.e., patch area minus edge buffer)
+  source: FRAGSTATS
+
+core_area_density:
+  name: Core Area Density
+  category: Core Area
+  level: Landscape
+  definition: >
+    Total core area per unit area of the landscape.
+  units: hectares per 100 hectares
+  interpretation: >
+    Standardized metric of how much core habitat exists in a landscape.
+  formula: Total core area / total landscape area * 100
+  source: FRAGSTATS
+
+mean_core_area:
+  name: Mean Core Area
+  category: Core Area
+  level: Class
+  definition: >
+    Average core area per patch of a given class.
+  units: hectares (ha)
+  interpretation: >
+    Reflects typical interior habitat size for a patch type.
+  formula: Total core area / number of patches
+  source: FRAGSTATS
+
+area_weighted_mean_core_area:
+  name: Area-Weighted Mean Core Area
+  category: Core Area
+  level: Class
+  definition: >
+    The mean core area weighted by the size of the patches.
+  units: hectares (ha)
+  interpretation: >
+    Gives more weight to larger patches with more interior habitat.
+  formula: Weighted average of patch core area
+  source: FRAGSTATS
+
+core_area_index:
+  name: Core Area Index
+  category: Core Area
+  level: Class / Landscape
+  definition: >
+    The proportion of the total landscape area that is core area.
+  units: percent (%)
+  interpretation: >
+    Indicates the dominance of edge-free interior habitat in the landscape.
+  formula: (Total core area / total landscape area) * 100
+  source: FRAGSTATS
+
+core_area_standard_deviation:
+  name: Standard Deviation of Core Area
+  category: Core Area
+  level: Class
+  definition: >
+    The variability in core area size among patches of a given type.
+  units: hectares (ha)
+  interpretation: >
+    High variability suggests an uneven distribution of core area sizes.
+  formula: Standard deviation of core areas
+  source: FRAGSTATS
+
+core_area_coefficient_of_variation:
+  name: Coefficient of Variation of Core Area
+  category: Core Area
+  level: Class
+  definition: >
+    The ratio of the standard deviation to the mean core area, expressed as a percentage.
+  units: percent (%)
+  interpretation: >
+    Standardized measure of relative variability in core area among patches.
+  formula: (Standard deviation / mean core area) * 100
+  source: FRAGSTATS
+
+contagion_index:
+  name: Contagion Index
+  category: Contagion / Aggregation
+  level: Landscape
+  definition: >
+    Measures the extent to which landscape elements are aggregated or clumped together.
+  units: percent (%)
+  interpretation: >
+    Higher values indicate a more clumped, less fragmented landscape. Lower values suggest dispersed and intermixed patches.
+  formula: Based on the adjacency matrix of patch types using relative cell adjacencies
+  source: FRAGSTATS
+
+interspersion_juxtaposition_index:
+  name: Interspersion and Juxtaposition Index
+  category: Contagion / Aggregation
+  level: Landscape
+  definition: >
+    Measures the degree to which different patch types are intermixed in a landscape.
+  units: percent (%)
+  interpretation: >
+    Higher values indicate a highly intermixed landscape; lower values suggest patch types are isolated or segregated.
+  formula: Based on pairwise adjacencies between patch types, normalized for maximum possible interspersion
+  source: FRAGSTATS
+
+aggregation_index:
+  name: Aggregation Index
+  category: Contagion / Aggregation
+  level: Class / Landscape
+  definition: >
+    Indicates the degree to which patches of the same class are spatially aggregated.
+  units: percent (%)
+  interpretation: >
+    Higher values mean patches are clustered together. Lower values mean they are dispersed.
+  formula: Ratio of observed like adjacencies to the maximum possible adjacencies for that class
+  source: FRAGSTATS
+
+clumpiness_index:
+  name: Clumpiness Index
+  category: Contagion / Aggregation
+  level: Class
+  definition: >
+    Measures the spatial autocorrelation of patch types based on the adjacency of similar patches.
+  units: unitless (−1 to 1)
+  interpretation: >
+    Values near 1 indicate strong clumping; values near 0 are random; values near −1 are evenly dispersed.
+  formula: Based on deviation of observed adjacencies from expected under a random distribution
+  source: FRAGSTATS
+
+percentage_of_like_adjacencies:
+  name: Percentage of Like Adjacencies (PLADJ)
+  category: Contagion / Aggregation
+  level: Class / Landscape
+  definition: >
+    The proportion of adjacent pixel pairs that are of the same patch type.
+  units: percent (%)
+  interpretation: >
+    Higher values suggest a more spatially aggregated distribution of that patch type.
+  formula: Number of like adjacencies / total adjacencies * 100
+  source: FRAGSTATS
+
+patch_type_interspersion:
+  name: Patch Type Interspersion
+  category: Contagion / Aggregation
+  level: Landscape
+  definition: >
+    Degree to which different patch types are evenly dispersed throughout the landscape.
+  units: percent (%)
+  interpretation: >
+    Helps identify spatial mixing of patch types — useful for edge-sensitive management.
+  formula: Derived from adjacency distributions of dissimilar patch types
+  source: FRAGSTATS
+
+euclidean_nearest_neighbor_distance:
+  name: Euclidean Nearest Neighbor Distance
+  category: Connectivity / Proximity
+  level: Patch / Class / Landscape
+  definition: >
+    The shortest straight-line distance between a patch and its nearest neighboring patch of the same type.
+  units: meters (m)
+  interpretation: >
+    Lower values suggest higher connectivity or clustering. Higher values suggest isolation.
+  formula: Minimum distance between patch edge and nearest edge of same class
+  source: FRAGSTATS
+
+mean_nearest_neighbor_distance:
+  name: Mean Nearest Neighbor Distance
+  category: Connectivity / Proximity
+  level: Class
+  definition: >
+    The average of the nearest neighbor distances for all patches of a class.
+  units: meters (m)
+  interpretation: >
+    Indicates how isolated patches are from each other.
+  formula: Mean of all patch-to-patch minimum distances
+  source: FRAGSTATS
+
+area_weighted_mean_nearest_neighbor_distance:
+  name: Area-Weighted Mean Nearest Neighbor Distance
+  category: Connectivity / Proximity
+  level: Class
+  definition: >
+    The nearest neighbor distance weighted by patch area.
+  units: meters (m)
+  interpretation: >
+    Puts more emphasis on larger patches when calculating connectivity.
+  formula: Weighted mean of nearest neighbor distances × patch area
+  source: FRAGSTATS
+
+proximity_index:
+  name: Proximity Index
+  category: Connectivity / Proximity
+  level: Patch / Class
+  definition: >
+    Measures the degree of isolation by considering size and proximity of neighboring patches within a specified buffer.
+  units: unitless
+  interpretation: >
+    High values indicate large, closely packed patches. Low values indicate isolated, small patches.
+  formula: Sum(area of neighboring patches / distance²)
+  source: FRAGSTATS
+
+connectance_index:
+  name: Connectance Index
+  category: Connectivity / Proximity
+  level: Class / Landscape
+  definition: >
+    The proportion of all patches within a class that are connected (within a specified distance threshold).
+  units: percent (%)
+  interpretation: >
+    Higher values indicate stronger landscape connectivity for the patch type.
+  formula: Number of functional connections / total possible connections × 100
+  source: FRAGSTATS
+
+cohesion_index:
+  name: Patch Cohesion Index
+  category: Connectivity / Proximity
+  level: Class
+  definition: >
+    Reflects the physical connectedness of patches by incorporating size and spatial configuration.
+  units: percent (%)
+  interpretation: >
+    Higher values indicate better connectivity and contiguous patch networks.
+  formula: Complex function of area, perimeter, and landscape area
+  source: FRAGSTATS
+
+dispersal_distance_index:
+  name: Dispersal Distance Index
+  category: Connectivity / Proximity
+  level: Class
+  definition: >
+    Measures the average distance individuals would need to move between patches to maintain connectivity.
+  units: meters (m)
+  interpretation: >
+    Useful in planning wildlife corridors and evaluating dispersal risks.
+  formula: Derived from centroid distances between patches
+  source: Landscape connectivity literature
+
+shannon_diversity_index:
+  name: Shannon Diversity Index (SHDI)
+  category: Diversity / Evenness
+  level: Landscape
+  definition: >
+    Measures landscape diversity, combining richness (number of patch types) and evenness (distribution).
+  units: unitless
+  interpretation: >
+    Higher values indicate more patch types with more balanced areas; lower values suggest dominance by one or a few types.
+  formula: -Σ (p_i × ln(p_i)), where p_i is the proportion of the landscape of patch type i
+  source: FRAGSTATS
+
+shannon_evenness_index:
+  name: Shannon Evenness Index (SHEI)
+  category: Diversity / Evenness
+  level: Landscape
+  definition: >
+    Measures how evenly patch types are distributed.
+  units: unitless (range 0–1)
+  interpretation: >
+    A value of 1 means perfect evenness; lower values indicate dominance by fewer types.
+  formula: SHDI / ln(number of patch types)
+  source: FRAGSTATS
+
+simpson_diversity_index:
+  name: Simpson Diversity Index
+  category: Diversity / Evenness
+  level: Landscape
+  definition: >
+    Measures the probability that two randomly chosen pixels belong to different patch types.
+  units: unitless (range 0–1)
+  interpretation: >
+    Higher values indicate greater diversity.
+  formula: 1 - Σ (p_i²)
+  source: FRAGSTATS
+
+simpson_evenness_index:
+  name: Simpson Evenness Index
+  category: Diversity / Evenness
+  level: Landscape
+  definition: >
+    Measures how evenly distributed patch types are using Simpson’s formula.
+  units: unitless
+  interpretation: >
+    A value of 1 indicates perfect evenness.
+  formula: Simpson Diversity Index / maximum possible value for given richness
+  source: FRAGSTATS
+
+modified_simpson_index:
+  name: Modified Simpson Index
+  category: Diversity / Evenness
+  level: Landscape
+  definition: >
+    Emphasizes dominance by the most common patch types more heavily than Shannon.
+  units: unitless
+  interpretation: >
+    A useful complement to Shannon and Simpson metrics when analyzing highly skewed landscapes.
+  formula: Variation on 1 - Σ (p_i²), with weight adjustments
+  source: FRAGSTATS
+
+patch_richness:
+  name: Patch Richness (PR)
+  category: Diversity / Evenness
+  level: Landscape
+  definition: >
+    The number of different patch types present in the landscape.
+  units: unitless
+  interpretation: >
+    Indicates compositional complexity. Does not account for abundance.
+  formula: Count of unique patch types
+  source: FRAGSTATS
+
+patch_richness_density:
+  name: Patch Richness Density (PRD)
+  category: Diversity / Evenness
+  level: Landscape
+  definition: >
+    The number of patch types per unit area.
+  units: types per 100 hectares
+  interpretation: >
+    A normalized richness metric for comparison between landscapes.
+  formula: Patch Richness / landscape area × 100
+  source: FRAGSTATS
+
