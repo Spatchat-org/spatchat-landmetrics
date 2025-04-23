@@ -133,8 +133,13 @@ with gr.Blocks(title="Spatchat") as iface:
     gr.HTML("""
         <head><link rel="icon" type="image/x-icon" href="spatchat-favicon.ico"></head>
     """)
-    gr.Image(value="logo/logo_long1.png", width=20, show_label=False, show_download_button=False)
-    gr.Markdown("## 🌲 Spatchat: Landscape Metric Assistant")
+    gr.Image(value="logo/logo_long1.png", width=40, show_label=False, show_download_button=False)
+    gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant")
+    gr.Markdown("""
+                <sub>© 2024 Ho Yi Wan & Logan Hysen. All rights reserved.<br>
+                If you use Spatchat in research, please cite:<br>
+                <b>Wan, H.Y.</b> & <b>Hysen, L.</b> (2025). <i>Spatchat: Landscape Metrics Assistant.</i></sub>
+                """)
 
     with gr.Row():
         with gr.Column(scale=1):
