@@ -133,8 +133,22 @@ with gr.Blocks(title="Spatchat") as iface:
     gr.HTML("""
         <head><link rel="icon" type="image/x-icon" href="spatchat-favicon.ico"></head>
     """)
-    gr.Image(value="logo/logo_long1.png", width=40, show_label=False, show_download_button=False)
+    gr.HTML('<img src="file=logo1.png" style="height:50px; margin-bottom:-10px;">')
     gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant")
+    gr.HTML('''
+    <div style="margin-top: -10px; margin-bottom: 15px;">
+      <input type="text" value="https://huggingface.co/spaces/your-org/spatchat" id="shareLink" readonly style="width: 70%; padding: 5px;">
+      <button onclick="navigator.clipboard.writeText(document.getElementById('shareLink').value)" style="padding: 5px 10px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">
+        📋 Copy Share Link
+      </button>
+      <div style="margin-top: 10px; font-size: 14px;">
+        <b>Share:</b>
+        <a href="https://twitter.com/intent/tweet?text=Check%20out%20Spatchat!%20https%3A%2F%2Fhuggingface.co%2Fspaces%2Fyour-org%2Fspatchat" target="_blank">🐦 Twitter</a> |
+        <a href="mailto:?subject=Spatchat&body=Check out Spatchat: https://huggingface.co/spaces/your-org/spatchat" target="_blank">📧 Email</a> |
+        <a href="https://www.facebook.com/sharer/sharer.php?u=https://huggingface.co/spaces/your-org/spatchat" target="_blank">📘 Facebook</a>
+      </div>
+    </div>
+    ''')
     gr.Markdown("""
                 <sub>© 2024 Ho Yi Wan & Logan Hysen. All rights reserved.<br>
                 If you use Spatchat in research, please cite:<br>
