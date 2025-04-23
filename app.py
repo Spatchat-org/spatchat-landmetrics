@@ -152,7 +152,7 @@ with gr.Blocks(title="Spatchat") as iface:
     }
     </style>
     """)
-    gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant")
+    gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant {landmetrics}")
     gr.HTML('''
     <div style="margin-top: -10px; margin-bottom: 15px;">
       <input type="text" value="https://hoyiwan-spatchat.hf.space/" id="shareLink" readonly style="width: 50%; padding: 5px; background-color: #f8f8f8; color: #222; font-weight: 500; border: 1px solid #ccc; border-radius: 4px;">
