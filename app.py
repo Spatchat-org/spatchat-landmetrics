@@ -132,11 +132,11 @@ def analyze_raster(file, question, history):
 with gr.Blocks(title="Spatchat") as iface:
     gr.HTML("""
         <head>
-            <link rel="icon" type="image/png" href="file=logo1.png">
+            <link rel="icon" type="image/png" href="file=logo/logo1.png">
         </head>
     """)
     gr.Image(
-    value="logo1.png",
+    value="logo/logo1.png",
     show_label=False,
     show_download_button=False,
     show_share_button=False,
