@@ -140,7 +140,6 @@ with gr.Blocks(title="Spatchat") as iface:
     show_label=False,
     show_download_button=False,
     show_share_button=False,
-    show_zoom=False,
     type="filepath",
     elem_id="logo-img"
     )
@@ -163,7 +162,6 @@ with gr.Blocks(title="Spatchat") as iface:
       <div style="margin-top: 10px; font-size: 14px;">
         <b>Share:</b>
         <a href="https://twitter.com/intent/tweet?text=Checkout+Spatchat!&url=https://hoyiwan-spatchat.hf.space/" target="_blank">🐦 Twitter</a> |
-        <a href="mailto:?subject=Spatchat&body=Check out Spatchat: https://hoyiwan-spatchat.hf.space/" target="_blank">📧 Email</a> |
         <a href="https://www.facebook.com/sharer/sharer.php?u=https://hoyiwan-spatchat.hf.space/" target="_blank">📘 Facebook</a>
       </div>
     </div>
