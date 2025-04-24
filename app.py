@@ -155,14 +155,14 @@ with gr.Blocks(title="Spatchat") as iface:
     gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant {landmetrics}")
     gr.HTML('''
     <div style="margin-top: -10px; margin-bottom: 15px;">
-      <input type="text" value="https://hoyiwan-spatchat.hf.space/" id="shareLink" readonly style="width: 50%; padding: 5px; background-color: #f8f8f8; color: #222; font-weight: 500; border: 1px solid #ccc; border-radius: 4px;">
+      <input type="text" value="hhttps://spatchat.org/browse/?room=landmetrics" id="shareLink" readonly style="width: 50%; padding: 5px; background-color: #f8f8f8; color: #222; font-weight: 500; border: 1px solid #ccc; border-radius: 4px;">
       <button onclick="navigator.clipboard.writeText(document.getElementById('shareLink').value)" style="padding: 5px 10px; background-color: #007BFF; color: white; border: none; border-radius: 4px; cursor: pointer;">
         📋 Copy Share Link
       </button>
       <div style="margin-top: 10px; font-size: 14px;">
         <b>Share:</b>
-        <a href="https://twitter.com/intent/tweet?text=Checkout+Spatchat!&url=https://hoyiwan-spatchat.hf.space/" target="_blank">🐦 Twitter</a> |
-        <a href="https://www.facebook.com/sharer/sharer.php?u=https://hoyiwan-spatchat.hf.space/" target="_blank">📘 Facebook</a>
+        <a href="https://twitter.com/intent/tweet?text=Checkout+Spatchat!&url=https://spatchat.org/browse/?room=landmetrics" target="_blank">🐦 Twitter</a> |
+        <a href="https://www.facebook.com/sharer/sharer.php?u=https://spatchat.org/browse/?room=landmetrics" target="_blank">📘 Facebook</a>
       </div>
     </div>
     ''')
