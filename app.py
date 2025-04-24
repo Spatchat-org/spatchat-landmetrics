@@ -161,9 +161,9 @@ with gr.Blocks(title="Spatchat") as iface:
       </button>
       <div style="margin-top: 10px; font-size: 14px;">
         <b>Share:</b>
-        <a href="https://twitter.com/intent/tweet?text=Check%20out%20Spatchat!%20https%3A%2F%2Fhuggingface.co%2Fspaces%2Fyour-org%2Fspatchat" target="_blank">🐦 Twitter</a> |
-        <a href="mailto:?subject=Spatchat&body=Check out Spatchat: https://huggingface.co/spaces/your-org/spatchat" target="_blank">📧 Email</a> |
-        <a href="https://www.facebook.com/sharer/sharer.php?u=https://huggingface.co/spaces/your-org/spatchat" target="_blank">📘 Facebook</a>
+        <a href="https://twitter.com/intent/tweet?text=Checkout+Spatchat!&url=https://hoyiwan-spatchat.hf.space/" target="_blank">🐦 Twitter</a> |
+        <a href="mailto:?subject=Spatchat&body=Check out Spatchat: https://hoyiwan-spatchat.hf.space/" target="_blank">📧 Email</a> |
+        <a href="https://www.facebook.com/sharer/sharer.php?u=https://hoyiwan-spatchat.hf.space/" target="_blank">📘 Facebook</a>
       </div>
     </div>
     ''')
