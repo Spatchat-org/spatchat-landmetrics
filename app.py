@@ -140,6 +140,7 @@ with gr.Blocks(title="Spatchat") as iface:
     show_label=False,
     show_download_button=False,
     show_share_button=False,
+    show_zoom=False,
     type="filepath",
     elem_id="logo-img"
     )
