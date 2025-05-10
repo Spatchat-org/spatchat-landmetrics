@@ -77,6 +77,7 @@ def clear_raster():
 
 # --- Unified LLM-powered analyzer ---
 def analyze_raster(file, question, history):
+    # Build the chat messages (system + history + user question)
     messages = [
         {"role": "system", "content": (
             "You are Spatchat, a helpful assistant that explains and calculates landscape metrics from raster files.\n"
@@ -90,7 +91,7 @@ def analyze_raster(file, question, history):
         {"role": "user", "content": question}
     ]
 
-    # Add grounding system message if raster is uploaded
+    # If a raster is uploaded, allow the LLM to reference real metrics
     if file is not None:
         messages.insert(1, {
             "role": "system",
@@ -98,33 +99,55 @@ def analyze_raster(file, question, history):
         })
 
     try:
-        # Inject real metrics into prompt if available
+        # If raster provided, read CRS & native resolution, then compute real metrics
         if file is not None:
-            landscape = Landscape(file.name, nodata=0)
+            with rasterio.open(file.name) as src:
+                crs = src.crs
+                x_res, y_res = src.res
+
+            # Pass true cell-size into PyLandStats for correct unit-based metrics
+            landscape = Landscape(
+                file.name,
+                nodata=0,
+                resolution=x_res
+            )
+
+            # Compute patch, class, and landscape metrics
             df_patch = landscape.compute_patch_metrics_df()
             df_class = landscape.compute_class_metrics_df()
-            df_land = landscape.compute_landscape_metrics_df()
+            df_land  = landscape.compute_landscape_metrics_df()
 
+            # Build a header showing CRS and key metrics
             real_metrics = (
-                f"Patch Density: {df_land.get('patch_density', [None])[0]:.4f}\n"
-                f"Edge Density: {df_land.get('edge_density', [None])[0]:.4f}\n"
+                f"CRS: {crs}\n"
+                f"Native cell-size: {x_res:.2f} × {y_res:.2f} (CRS units)\n\n"
+                f"Patch Density: {df_land.get('patch_density', [np.nan])[0]:.4f}\n"
+                f"Edge Density: {df_land.get('edge_density', [np.nan])[0]:.4f}\n"
                 f"Number of Patches: {df_class['number_of_patches'].sum()}\n"
             )
+
+            # Inject real metrics into the user message for the LLM
             messages[-1]['content'] += f"\n\nHere are real metrics from the uploaded raster:\n{real_metrics}"
 
-        # Get LLM response
+        # Call the LLM
         response = client.chat.completions.create(
             model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
             messages=messages,
             temperature=0.4
-        ).choices[0].message.content
+        )
+        response_text = response.choices[0].message.content
 
     except Exception as e:
-        return history + [{"role": "user", "content": question}, {"role": "assistant", "content": f"⚠️ LLM error: {e}"}]
+        # On error, report back in the chat history
+        return history + [
+            {"role": "user",    "content": question},
+            {"role": "assistant", "content": f"⚠️ LLM error: {e}"}
+        ]
 
+    # Append the user question and assistant response to the history
     return history + [
-        {"role": "user", "content": question},
-        {"role": "assistant", "content": response}
+        {"role": "user",    "content": question},
+        {"role": "assistant", "content": response_text}
     ]
 
 
