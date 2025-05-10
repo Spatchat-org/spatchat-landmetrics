@@ -77,56 +77,98 @@ def clear_raster():
 
 # --- Unified LLM-powered analyzer ---
 def analyze_raster(file, question, history):
-    # Build the chat messages (system + history + user question)
+    import re
+    # Build initial chat messages
     messages = [
         {"role": "system", "content": (
             "You are Spatchat, a helpful assistant that explains and calculates landscape metrics from raster files.\n"
-            "If no raster is uploaded, do not attempt to calculate anything.\n"
-            "If a raster is uploaded and the user asks for a metric, use pylandstats to calculate it.\n"
-            "You can calculate patch metrics, class metrics, and landscape metrics using pylandstats.\n"
-            "If the user asks you to calculate a metric or multiple metrics, display the results clearly. You do not need to provide detailed explanations.\n"
-            "Be conversational and helpful. If the question is vague, ask the user to clarify."
+            "If the user explicitly requests landscape metrics, use pylandstats to calculate them.\n"
+            "Otherwise, simply acknowledge the upload without precomputing metrics.\n"
+            "If the question is too vague, ask the user to clarify."
         )},
         *history,
         {"role": "user", "content": question}
     ]
 
-    # If a raster is uploaded, allow the LLM to reference real metrics
+    # Acknowledge uploaded raster
     if file is not None:
         messages.insert(1, {
             "role": "system",
-            "content": "A raster file has been uploaded. You may reference real landscape metrics that were computed using pylandstats."
+            "content": "A raster file has been uploaded and is available for analysis."
         })
 
+    # Lowercase question for pattern matching
+    lower_q = question.lower()
+
+    # If the user asks for the list of available metrics, return a categorized catalog
+    if re.search(r"\b(list|available|which).*metrics\b", lower_q):
+        # Define categories and their metric keys
+        categories = {
+            "Landscape metrics": ["contag", "shdi", "shei", "mesh", "lsi", "tca"],
+            "Class metrics": ["pland", "np", "pd", "lpi", "total_edge", "edge_density"],
+            "Patch metrics": ["area", "perim", "para", "shape", "frac", "enn", "core", "nca", "cai"]
+        }
+        # Build catalog text
+        catalog_sections = []
+        for cat, keys in categories.items():
+            lines = [f"- **{metric_definitions[k][0]}** (`{k}`): {metric_definitions[k][1]}" for k in keys]
+            catalog_sections.append(f"{cat}:\n" + "\n".join(lines))
+        catalog_text = "\n\n".join(catalog_sections)
+        response_text = "Here are the available metrics by category:\n\n" + catalog_text
+        return history + [{"role": "assistant", "content": response_text}]
+
+    # Detect if the user is asking for metrics calculations
+    metric_keys = list(metric_definitions.keys())
+    calc_terms = ['calculate', 'metrics', 'what is', 'show', 'compute', 'density', 'number']
+    pattern = re.compile(r"\b(" + "|".join(metric_keys + calc_terms) + r")\b", re.IGNORECASE)
+    want_metrics = bool(pattern.search(lower_q))
+
+    # Determine specification of class or landscape level
+    want_class = bool(re.search(r"\bclass\b", lower_q))
+    want_land = bool(re.search(r"\blandscape\b", lower_q))
+    if want_metrics and not (want_class or want_land):
+        want_class = want_land = True
+
+    response_text = None
     try:
-        # If raster provided, read CRS & native resolution, then compute real metrics
-        if file is not None:
+        if file is not None and want_metrics:
+            # Read CRS & native resolution
             with rasterio.open(file.name) as src:
                 crs = src.crs
                 x_res, y_res = src.res
 
-            # Pass true cell-size into PyLandStats for correct unit-based metrics
+            # Compute metrics with true cell-size
             landscape = Landscape(
                 file.name,
                 nodata=0,
                 resolution=x_res
             )
-
-            # Compute patch, class, and landscape metrics
             df_patch = landscape.compute_patch_metrics_df()
             df_class = landscape.compute_class_metrics_df()
             df_land  = landscape.compute_landscape_metrics_df()
 
-            # Build a header showing CRS and key metrics
+            # Landscape-level string
+            land_metrics = (
+                f"Patch Density: {df_land.get('patch_density',[float('nan')])[0]:.4f}\n"
+                f"Edge Density: {df_land.get('edge_density',[float('nan')])[0]:.4f}\n"
+                f"Total Core Area: {df_land.get('total_core_area',[float('nan')])[0]:.4f}\n"
+            )
+            # Class-level table
+            class_metrics = df_class.to_string(index=False)
+
+            # Combine per user spec
+            report_parts = []
+            if want_land:
+                report_parts.append("**Landscape-level metrics:**\n" + land_metrics)
+            if want_class:
+                report_parts.append("**Class-level metrics:**\n" + class_metrics)
+
             real_metrics = (
                 f"CRS: {crs}\n"
                 f"Native cell-size: {x_res:.2f} × {y_res:.2f} (CRS units)\n\n"
-                f"Patch Density: {df_land.get('patch_density', [np.nan])[0]:.4f}\n"
-                f"Edge Density: {df_land.get('edge_density', [np.nan])[0]:.4f}\n"
-                f"Number of Patches: {df_class['number_of_patches'].sum()}\n"
+                + "\n\n".join(report_parts)
             )
 
-            # Inject real metrics into the user message for the LLM
             messages[-1]['content'] += f"\n\nHere are real metrics from the uploaded raster:\n{real_metrics}"
 
         # Call the LLM
@@ -138,17 +180,17 @@ def analyze_raster(file, question, history):
         response_text = response.choices[0].message.content
 
     except Exception as e:
-        # On error, report back in the chat history
         return history + [
-            {"role": "user",    "content": question},
+            {"role": "user", "content": question},
             {"role": "assistant", "content": f"⚠️ LLM error: {e}"}
         ]
 
-    # Append the user question and assistant response to the history
+    # Append to chat history
     return history + [
-        {"role": "user",    "content": question},
+        {"role": "user", "content": question},
         {"role": "assistant", "content": response_text}
     ]
+
 
 
 # --- UI layout ---
@@ -204,7 +246,7 @@ with gr.Blocks(title="Spatchat") as iface:
             clear_raster_button = gr.Button("Clear Raster")
         with gr.Column(scale=1):
             chatbot = gr.Chatbot(label="Spatchat Dialog", type="messages")
-            question_input = gr.Textbox(label="Ask Spatchat", placeholder="e.g., What is edge density?", lines=1)
+            question_input = gr.Textbox(label="Ask Spatchat", placeholder="e.g., Calculate edge density?", lines=1)
             ask_button = gr.Button("Ask")
             clear_button = gr.Button("Clear Chat")
 
