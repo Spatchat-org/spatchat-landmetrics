@@ -2,13 +2,10 @@ import gradio as gr
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import rasterio
-from rasterio.plot import show
 import numpy as np
 from pylandstats import Landscape
 import re
 import pandas as pd
-from itertools import product
-from io import StringIO
 from dotenv import load_dotenv
 import os
 from together import Together
@@ -44,31 +41,33 @@ metric_definitions = {
     "total_edge": ("Total Edge (TE)", "Total length of all patch edges.")
 }
 
-# --- Raster preview ---
+# --- Raster preview with class-name mapping ---
 def preview_raster(file):
     try:
         with rasterio.open(file.name) as src:
-            data = src.read(1)
-            unique = np.unique(data[data != 0])
-            # Attempt to use class names from metadata
-            tags = src.tags()
-            class_names = None
-            for k, v in tags.items():
-                if k.lower().startswith('class') and (';' in v or ',' in v):
-                    class_names = re.split(r'[;,]', v)
-                    break
-        labels = []
-        if class_names and len(class_names) >= len(unique):
-            for val in unique:
-                labels.append(class_names[list(unique).index(val)].strip())
+            raw = src.read(1)
+        # map strings to integer codes if needed
+        if raw.dtype.kind in ('U','S','O'):
+            raw_str = raw.astype(str)
+            uniq = np.unique(raw_str[raw_str != ''])
+            name2code = {n: i+1 for i, n in enumerate(uniq)}
+            code2name = {c: n for n, c in name2code.items()}
+            data = np.zeros_like(raw, dtype=int)
+            for n, c in name2code.items():
+                data[raw_str == n] = c
+            labels = [code2name[c] for c in sorted(code2name)]
+            unique_vals = sorted(code2name)
         else:
-            labels = [f'Class {int(val)}' for val in unique]
-        colors = plt.cm.tab10(np.linspace(0, 1, len(unique)))
+            data = raw
+            unique_vals = np.unique(data[data != 0]).tolist()
+            labels = [f"Class {int(v)}" for v in unique_vals]
+
+        colors = plt.cm.tab10(np.linspace(0, 1, len(unique_vals)))
         fig, ax = plt.subplots(figsize=(5, 5))
         ax.imshow(data, cmap='tab10', interpolation='nearest')
         ax.set_title("Uploaded Raster")
         ax.axis('off')
-        handles = [mpatches.Patch(color=colors[i], label=labels[i]) for i in range(len(unique))]
+        handles = [mpatches.Patch(color=colors[i], label=labels[i]) for i in range(len(unique_vals))]
         ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
         return fig
     except Exception:
@@ -86,88 +85,123 @@ def clear_raster():
     ax.axis('off')
     return None, gr.update(value=fig, visible=True)
 
-# --- Post-upload greeting ---
+# --- Post-upload prompt ---
 def on_upload(file, history):
     if file is not None:
-        return history + [{"role": "user", "content": "<file uploaded>"},
-                          {"role": "assistant", "content": (
-            "Awesome! I can see your raster now. "
-            "You can ask me to calculate any landscape metrics, e.g., 'Calculate Edge Density'."
-        )}]
+        return history + [
+            {"role": "user", "content": "<file uploaded>"},
+            {"role": "assistant", "content": (
+                "Awesome! I can see your raster now. "
+                "You can ask me to calculate any landscape metrics, e.g., 'Calculate Edge Density'."
+            )}
+        ]
     return history
 
-# --- Unified LLM-powered analyzer ---
+# --- Unified LLM-powered analyzer with string handling ---
 def analyze_raster(file, question, history):
     import re
-    # Append the user message first
+    # append user message
     history = history + [{"role": "user", "content": question}]
-    # Build the chat messages
+    # system prompt
     messages = [
         {"role": "system", "content": (
             "You are Spatchat, a helpful assistant that explains landscape metrics and describes raster properties.\n"
-            "Use rasterio for metadata (CRS, spatial resolution, extent, bands, nodata) and pylandstats for metrics.\n"
-            "If the user explicitly requests landscape metrics, calculate them; otherwise answer simple queries or list metrics without computing.\n"
-            "Examples:\n"
-            "- User: 'What is the CRS of this raster?' → Assistant reads src.crs and replies 'The CRS is EPSG:4326'.\n"
-            "- User: 'What is the resolution?' → Assistant reads src.res and replies '30.00 x 30.00 meters per pixel'.\n"
-            "- User: 'List available metrics' → Assistant returns categories and metric descriptions.\n"
-            "- User: 'Calculate edge density' → Assistant uses pylandstats, computes both levels, and returns results."
+            "Use rasterio for metadata (CRS, resolution, extent, bands, nodata) and pylandstats for metrics.\n"
+            "If the user explicitly requests metrics, calculate both landscape- and class-level.\n"
+            "Otherwise answer questions (e.g., resolution, extent) directly or list metrics on request."
         )},
         *history
     ]
-    # Inform LLM that raster is available
     if file is not None:
         messages.insert(1, {"role": "system", "content": "A raster file has been uploaded and is available for analysis."})
+
     lower_q = question.lower()
-    # Fast-paths and metric logic as before...
-    # [existing resolution, catalog, metric computations]
-    # Final assistant response from LLM or direct computation
-    # Example direct return for resolution:
+
+    # fast-path: resolution
     if file is not None and re.search(r"\bresolution\b", lower_q):
         with rasterio.open(file.name) as src:
             x_res, y_res = src.res
             unit = getattr(src.crs.axis_info[0], 'unit_name', 'unit')
-        resp = f"The native resolution of this raster is {x_res:.2f} × {y_res:.2f} {unit} per pixel."
-        return history + [{"role": "assistant", "content": resp}]
-    # ... similar for metrics and catalog ...
-    # Otherwise delegate to LLM
-    response = client.chat.completions.create(
+        return history + [{"role": "assistant", "content": f"The native resolution is {x_res:.2f} × {y_res:.2f} {unit} per pixel."}]
+
+    # list metrics
+    if re.search(r"\b(list|available|which).*metrics\b", lower_q):
+        cats = {
+            "Landscape": ["contag","shdi","shei","mesh","lsi","tca"],
+            "Class": ["pland","np","pd","lpi","total_edge","edge_density"],
+            "Patch": ["area","perim","para","shape","frac","enn","core","nca","cai"]
+        }
+        lines = []
+        for cat, keys in cats.items():
+            lines.append(f"**{cat}-level metrics:**")
+            for k in keys:
+                lines.append(f"- {metric_definitions[k][0]} (`{k}`): {metric_definitions[k][1]}")
+        return history + [{"role": "assistant", "content": "Here are available metrics:\n" + "\n".join(lines)}]
+
+    # detect compute
+    metric_keys = list(metric_definitions.keys())
+    if re.search(r"\b(calculate|compute|metrics|density|number|what is|show)\b", lower_q):
+        # read raw data and metadata
+        with rasterio.open(file.name) as src:
+            raw = src.read(1)
+            crs = src.crs
+            x_res, y_res = src.res
+            extent = src.bounds
+            bands = src.count
+            nodata = src.nodata
+        # map strings
+        if raw.dtype.kind in ('U','S','O'):
+            raw_str = raw.astype(str)
+            uniq = np.unique(raw_str[raw_str!=''])
+            name2code = {n:i+1 for i,n in enumerate(uniq)}
+            code2name = {c:n for n,c in name2code.items()}
+            arr = np.zeros_like(raw, dtype=int)
+            for n,c in name2code.items():
+                arr[raw_str==n] = c
+        else:
+            arr = raw
+            code2name = {int(v):f'Class {int(v)}' for v in np.unique(arr[arr!=0])}
+        # compute metrics
+        landscape = Landscape(arr, nodata=0, resolution=x_res)
+        df_land = landscape.compute_landscape_metrics_df()
+        df_class = landscape.compute_class_metrics_df()
+        # format
+        land_txt = f"Patch Density: {df_land['patch_density'][0]:.4f}\nEdge Density: {df_land['edge_density'][0]:.4f}\n"
+        df_class.insert(0, 'class_name', df_class.index.to_series().map(code2name))
+        df_class = df_class.reset_index(drop=True)
+        class_txt = df_class.to_string(index=False)
+        header = f"CRS: {crs}\nResolution: {x_res:.2f}×{y_res:.2f}\nExtent: {extent}\nBands: {bands}\nNoData: {nodata}\n\n"
+        body = f"**Landscape-level metrics:**\n{land_txt}\n**Class-level metrics:**\n{class_txt}"
+        return history + [{"role": "assistant", "content": header + body}]
+
+    # fallback to LLM
+    resp = client.chat.completions.create(
         model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
         messages=messages,
         temperature=0.4
     )
-    return history + [{"role": "assistant", "content": response.choices[0].message.content}]
+    return history + [{"role": "assistant", "content": resp.choices[0].message.content}]
 
 # --- UI layout ---
 with gr.Blocks(title="Spatchat") as iface:
     initial_history = [{"role": "assistant", "content": (
-        "Hi, I am Spatchat. I can help you explore your raster file—\n"
-        "ask me about metadata (CRS, resolution, extent) or calculate landscape metrics.\n"
+        "Hi, I am Spatchat. I can help you explore your raster—ask about CRS, resolution, extent or calculate landscape metrics.\n"
         "Please upload a raster to begin."
     )}]
-    gr.HTML("""
-        <head>
-            <link rel="icon" type="image/png" href="file=logo1.png">
-        </head>
-    """)
-    gr.Image(value="logo/logo_long1.png", show_label=False, show_download_button=False,
-             show_share_button=False, type="filepath", elem_id="logo-img")
-    with gr.Row():
-        with gr.Column(scale=1):
-            file_input = gr.File(label="Upload GeoTIFF", type="filepath")
-            raster_output = gr.Plot(label="Raster Preview", visible=True)
-            clear_raster_button = gr.Button("Clear Raster")
-        with gr.Column(scale=1):
-            chatbot = gr.Chatbot(label="Spatchat Dialog", type="messages", value=initial_history)
-            question_input = gr.Textbox(label="Ask Spatchat", placeholder="e.g., Calculate edge density?", lines=1)
-            ask_button = gr.Button("Ask")
-            clear_button = gr.Button("Clear Chat")
-    file_input.change(fn=preview_raster, inputs=file_input, outputs=raster_output)
-    file_input.change(fn=on_upload, inputs=[file_input, chatbot], outputs=chatbot)
-    clear_raster_button.click(fn=clear_raster, inputs=None, outputs=[file_input, raster_output])
-    question_input.submit(fn=analyze_raster, inputs=[file_input, question_input, chatbot], outputs=chatbot)
-    ask_button.click(fn=analyze_raster, inputs=[file_input, question_input, chatbot], outputs=chatbot)
-    question_input.submit(fn=lambda: "", inputs=None, outputs=question_input)
-    ask_button.click(fn=lambda: "", inputs=None, outputs=question_input)
-    clear_button.click(fn=lambda: [], inputs=None, outputs=chatbot)
+
+    file_input = gr.File(label="Upload GeoTIFF", type="filepath")
+    raster_output = gr.Plot(label="Raster Preview")
+    chatbot = gr.Chatbot(value=initial_history, label="Spatchat Dialog")
+    question_input = gr.Textbox(label="Ask Spatchat", placeholder="e.g., Calculate edge density?", lines=1)
+    ask_button = gr.Button("Ask")
+    clear_button = gr.Button("Clear Chat")
+
+    # event bindings
+    file_input.change(preview_raster, inputs=file_input, outputs=raster_output)
+    file_input.change(on_upload, inputs=[file_input, chatbot], outputs=chatbot)
+    clear_button.click(lambda: initial_history, inputs=None, outputs=chatbot)
+    ask_button.click(analyze_raster, inputs=[file_input, question_input, chatbot], outputs=chatbot)
+    question_input.submit(analyze_raster, inputs=[file_input, question_input, chatbot], outputs=chatbot)
+    question_input.submit(lambda: "", None, question_input)
+
 iface.launch()
