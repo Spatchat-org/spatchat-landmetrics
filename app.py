@@ -116,7 +116,7 @@ def analyze_raster(file, question, history):
         return history + [{"role": "assistant", "content": "; ".join(parts)}], ""
 
     # List metrics
-    if re.search(r"\b(list|available|which).*metrics\b", lower_q):
+    if re.search(r"\b(what|which|list|available).*metrics\b", lower_q):
         cats = {
             "Landscape": ["contag", "shdi", "shei", "mesh", "lsi", "tca"],
             "Class": ["pland", "np", "pd", "lpi", "total_edge", "edge_density"],
@@ -129,51 +129,56 @@ def analyze_raster(file, question, history):
                 lines.append(f"- {metric_definitions[k][0]} (`{k}`)")
         return history + [{"role": "assistant", "content": "\n".join(lines)}], ""
 
-    # Compute edge density only
-    if re.search(r"\b(calculate|compute|edge density|ed)\b", lower_q):
+    # Compute a specific metric dynamically
+    # Find if any metric code is mentioned
+    metric_keys = list(metric_definitions.keys())
+    requested = [k for k in metric_keys if re.search(fr"\b{k}\b", lower_q)]
+    if file and requested:
+        key = requested[0]
         with rasterio.open(file.name) as src:
             raw = src.read(1)
             x_res, y_res = src.res
+        # map strings to ints if needed
+        if raw.dtype.kind in ('U','S','O'):
+            raw_str = raw.astype(str)
+            uniq = np.unique(raw_str[raw_str!=''])
+            name2code = {n:i+1 for i,n in enumerate(uniq)}
+            code2name = {c:n for n,c in name2code.items()}
+            arr = np.zeros_like(raw, dtype=int)
+            for n,c in name2code.items():
+                arr[raw_str==n] = c
+        else:
+            arr = raw
+            code2name = {int(v):f"Class {int(v)}" for v in np.unique(arr[arr!=0])}
+        landscape = Landscape(arr, res=(x_res, y_res), nodata=0)
+        df_land = landscape.compute_landscape_metrics_df()
+        df_class = landscape.compute_class_metrics_df()
+        # pull landscape value
+        land_val = df_land.get(key if key!='ed' else 'edge_density', [None])[0]
+        # pull class-level
+        class_series = df_class[key if key!='ed' else 'edge_density']
+        df_class.insert(0, 'class_name', df_class.index.to_series().map(code2name))
+        df_sub = df_class[['class_name', key if key!='ed' else 'edge_density']]
+        table = df_sub.to_markdown(index=False)
+        # header metadata
+        with rasterio.open(file.name) as src:
             crs = src.crs
             ext = src.bounds
             bcount = src.count
             nod = src.nodata
-        if raw.dtype.kind in ('U', 'S', 'O'):
-            rs = raw.astype(str)
-            uniq = np.unique(rs[rs != ''])
-            n2c = {n: i+1 for i, n in enumerate(uniq)}
-            c2n = {c: n for n, c in n2c.items()}
-            arr = np.zeros_like(raw, dtype=int)
-            for n, c in n2c.items():
-                arr[rs == n] = c
-        else:
-            arr = raw
-            c2n = {int(v): f"Class {int(v)}" for v in np.unique(arr[arr != 0])}
-        ls = Landscape(arr, res=(x_res, y_res), nodata=0)
-        dfL = ls.compute_landscape_metrics_df()
-        dfC = ls.compute_class_metrics_df()
-        land_txt = f"Edge Density: {dfL['edge_density'][0]:.4f}" 
-        dfC.insert(0, 'class_name', dfC.index.to_series().map(c2n))
-        df_sub = dfC[['class_name', 'edge_density']]
-        table = df_sub.to_markdown(index=False)
-        hdr = (
-            f"CRS: {crs}\n"
-            f"Resolution: {x_res:.2f}×{y_res:.2f}\n"
-            f"Extent: {ext}\n"
-            f"Bands: {bcount}\n"
-            f"NoData: {nod}\n\n"
-        )
-        content = (
-            f"**Landscape-level edge density:**\n{land_txt}\n\n"
-            f"**Class-level edge density:**\n{table}"
-        )
+        hdr = (f"CRS: {crs}\nResolution: {x_res:.2f}×{y_res:.2f}\n"
+               f"Extent: {ext}\nBands: {bcount}\nNoData: {nod}\n\n")
+        # metric names
+        name = metric_definitions[key][0]
+        content = (f"**Landscape-level {name}:**\n{land_val:.4f}\n\n"
+                   f"**Class-level {name}:**\n{table}")
         return history + [{"role": "assistant", "content": hdr + content}], ""
 
     # Fallback LLM
     messages = [
         {"role": "system", "content": (
             "You are Spatchat, a helpful assistant that explains metrics and raster properties."
-            "Use rasterio and pylandstats appropriately."
+            " Use rasterio and pylandstats appropriately."
         )},
         *history
     ]
