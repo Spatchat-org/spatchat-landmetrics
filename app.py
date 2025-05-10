@@ -234,12 +234,13 @@ with gr.Blocks(title="Spatchat") as iface:
             raster_output = gr.Plot(label="Raster Preview", visible=True)
             clear_raster_button = gr.Button("Clear Raster")
         with gr.Column(scale=1):
-            chatbot = gr.Chatbot(label="Spatchat Dialog", type="messages", value=[
-                {"role": "assistant", "content": (
-                    "Hi, I am Spatchat. I can help you explore your raster—ask about CRS, resolution, extent, or calculate metrics.
-Please upload a raster to begin."
-                )}
-            ])
+            chatbot = gr.Chatbot(
+                label="Spatchat Dialog", 
+                type="messages", 
+                value=[
+                    {"role": "assistant", "content": "Hi, I am Spatchat. I can help you explore your raster—ask about CRS, resolution, extent, or calculate metrics. Please upload a raster to begin."}
+                ]
+            )
             question_input = gr.Textbox(label="Ask Spatchat", placeholder="e.g., Calculate edge density?", lines=1)
             ask_button = gr.Button("Ask")
             clear_button = gr.Button("Clear Chat")
