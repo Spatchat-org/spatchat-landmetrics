@@ -16,7 +16,29 @@ client = Together(api_key=os.getenv("TOGETHER_API_KEY"))
 
 # --- Metric glossary ---
 metric_definitions = {
-    # define metrics as before
+    "pland": ("Proportion of Landscape (PLAND)", "Percentage of landscape comprised by the class."),
+    "np": ("Number of Patches (NP)", "Total number of patches for the class or landscape."),
+    "pd": ("Patch Density (PD)", "Number of patches per 100 hectares."),
+    "lpi": ("Largest Patch Index (LPI)", "Percentage of total landscape made up by the largest patch."),
+    "te": ("Total Edge (TE)", "Total length of all patch edges."),
+    "ed": ("Edge Density (ED)", "Edge length per hectare."),
+    "lsi": ("Landscape Shape Index (LSI)", "Overall shape complexity of the landscape."),
+    "tca": ("Total Core Area (TCA)", "Sum of all core areas in the landscape."),
+    "mesh": ("Effective Mesh Size (MESH)", "Average size of patches after accounting for edge and fragmentation."),
+    "contag": ("Contagion Index (CONTAG)", "Clumpiness of patches — higher means more aggregated."),
+    "shdi": ("Shannon Diversity Index (SHDI)", "Diversity of patch types."),
+    "shei": ("Shannon Evenness Index (SHEI)", "Evenness of patch distribution."),
+    "area": ("Patch Area (AREA)", "Area of each individual patch."),
+    "perim": ("Patch Perimeter (PERIM)", "Perimeter of each patch."),
+    "para": ("Perimeter-Area Ratio (PARA)", "Ratio of perimeter to area for each patch."),
+    "shape": ("Shape Index (SHAPE)", "Shape complexity of each patch."),
+    "frac": ("Fractal Dimension (FRAC)", "Fractal complexity of each patch shape."),
+    "enn": ("Euclidean Nearest Neighbor Distance (ENN)", "Distance to nearest patch of same class."),
+    "core": ("Core Area (CORE)", "Interior area of a patch excluding edges."),
+    "nca": ("Number of Core Areas (NCA)", "Total core regions in the landscape."),
+    "cai": ("Core Area Index (CAI)", "Proportion of core area to total patch area."),
+    "edge_density": ("Edge Density (ED)", "Edge length per hectare."),
+    "total_edge": ("Total Edge (TE)", "Total length of all patch edges.")
 }
 
 # --- Raster preview with class-name mapping ---
