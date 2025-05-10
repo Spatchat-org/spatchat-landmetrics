@@ -107,7 +107,7 @@ def analyze_raster(file, question, history):
         {"role": "system", "content": (
             "You are Spatchat, a helpful assistant that explains landscape metrics and describes raster properties.\n"
             "Use rasterio for metadata (CRS, resolution, extent, bands, nodata) and pylandstats for metrics.\n"
-            "If the user explicitly requests metrics, calculate both landscape- and class-level.\n"
+            "If the user explicitly requests metrics, calculate landscape- and class-level metrics.\n"
             "Otherwise answer questions (e.g., resolution, extent) directly or list metrics on request."
         )},
         *history
@@ -121,7 +121,8 @@ def analyze_raster(file, question, history):
     if file is not None and re.search(r"\bresolution\b", lower_q):
         with rasterio.open(file.name) as src:
             x_res, y_res = src.res
-            unit = getattr(src.crs.axis_info[0], 'unit_name', 'unit')
+            # use linear_units instead of axis_info
+            unit = getattr(src.crs, 'linear_units', 'unit')
         return history + [{"role": "assistant", "content": f"The native resolution is {x_res:.2f} × {y_res:.2f} {unit} per pixel."}]
 
     # list metrics
@@ -139,9 +140,7 @@ def analyze_raster(file, question, history):
         return history + [{"role": "assistant", "content": "Here are available metrics:\n" + "\n".join(lines)}]
 
     # detect compute
-    metric_keys = list(metric_definitions.keys())
     if re.search(r"\b(calculate|compute|metrics|density|number|what is|show)\b", lower_q):
-        # read raw data and metadata
         with rasterio.open(file.name) as src:
             raw = src.read(1)
             crs = src.crs
@@ -161,18 +160,16 @@ def analyze_raster(file, question, history):
         else:
             arr = raw
             code2name = {int(v):f'Class {int(v)}' for v in np.unique(arr[arr!=0])}
-        # compute metrics
-        landscape = Landscape(arr, nodata=0, resolution=x_res)
+        # pass res instead of resolution
+        landscape = Landscape(arr, res=x_res, nodata=0)
         df_land = landscape.compute_landscape_metrics_df()
         df_class = landscape.compute_class_metrics_df()
-        # format
         land_txt = f"Patch Density: {df_land['patch_density'][0]:.4f}\nEdge Density: {df_land['edge_density'][0]:.4f}\n"
-        df_class.insert(0, 'class_name', df_class.index.to_series().map(code2name))
+        df_class.insert(0,'class_name', df_class.index.to_series().map(code2name))
         df_class = df_class.reset_index(drop=True)
         class_txt = df_class.to_string(index=False)
         header = f"CRS: {crs}\nResolution: {x_res:.2f}×{y_res:.2f}\nExtent: {extent}\nBands: {bands}\nNoData: {nodata}\n\n"
-        body = f"**Landscape-level metrics:**\n{land_txt}\n**Class-level metrics:**\n{class_txt}"
-        return history + [{"role": "assistant", "content": header + body}]
+        return history + [{"role": "assistant", "content": header + f"**Landscape-level metrics:**\n{land_txt}\n**Class-level metrics:**\n{class_txt}"}]
 
     # fallback to LLM
     resp = client.chat.completions.create(
@@ -182,26 +179,79 @@ def analyze_raster(file, question, history):
     )
     return history + [{"role": "assistant", "content": resp.choices[0].message.content}]
 
+
 # --- UI layout ---
 with gr.Blocks(title="Spatchat") as iface:
-    initial_history = [{"role": "assistant", "content": (
-        "Hi, I am Spatchat. I can help you explore your raster—ask about CRS, resolution, extent or calculate landscape metrics.\n"
-        "Please upload a raster to begin."
-    )}]
+    # --- Logo and Header ---
+    gr.HTML("""
+        <head>
+            <link rel="icon" type="image/png" href="file=logo1.png">
+        </head>
+    """ )
+    gr.Image(
+        value="logo/logo_long1.png",
+        show_label=False,
+        show_download_button=False,
+        show_share_button=False,
+        type="filepath",
+        elem_id="logo-img"
+    )
+    gr.HTML("""
+    <style>
+    #logo-img img {
+        height: 90px;
+        margin: 10px 50px 10px 10px;
+        border-radius: 6px;
+    }
+    </style>
+    """ )
+    gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant")
+    gr.HTML('''
+    <div style="margin-top: -10px; margin-bottom: 15px;">
+      <input type="text" value="https://spatchat.org/browse/?room=landmetrics" readonly style="width: 50%; padding: 5px; background-color: #f8f8f8; color: #222; font-weight: 500; border: 1px solid #ccc; border-radius: 4px;">
+      <button onclick="navigator.clipboard.writeText(this.previousElementSibling.value)" style="padding: 5px 10px; background-color: #007BFF; color: white; border: none; border-radius: 4px; cursor: pointer;">
+        📋 Copy Share Link
+      </button>
+      <div style="margin-top: 10px; font-size: 14px;">
+        <b>Share:</b>
+        <a href="https://twitter.com/intent/tweet?text=Checkout+Spatchat!&url=https://spatchat.org/browse/?room=landmetrics" target="_blank">🐦 Twitter</a> |
+        <a href="https://www.facebook.com/sharer/sharer.php?u=https://spatchat.org/browse/?room=landmetrics" target="_blank">📘 Facebook</a>
+      </div>
+    </div>
+    ''')
+    gr.Markdown("""
+    <div style="font-size: 14px;">
+    © 2025 Ho Yi Wan & Logan Hysen. All rights reserved.<br>
+    If you use Spatchat in research, please cite:<br>
+    <b>Wan, H.Y.</b> & <b>Hysen, L.</b> (2025). <i>Spatchat: Landscape Metrics Assistant.</i>
+    </div>
+    """ )
 
-    file_input = gr.File(label="Upload GeoTIFF", type="filepath")
-    raster_output = gr.Plot(label="Raster Preview")
-    chatbot = gr.Chatbot(value=initial_history, label="Spatchat Dialog", type="messages")
-    question_input = gr.Textbox(label="Ask Spatchat", placeholder="e.g., Calculate edge density?", lines=1)
-    ask_button = gr.Button("Ask")
-    clear_button = gr.Button("Clear Chat")
+    # Layout: two columns
+    with gr.Row():
+        with gr.Column(scale=1):
+            file_input = gr.File(label="Upload GeoTIFF", type="filepath")
+            raster_output = gr.Plot(label="Raster Preview", visible=True)
+            clear_raster_button = gr.Button("Clear Raster")
+        with gr.Column(scale=1):
+            chatbot = gr.Chatbot(label="Spatchat Dialog", type="messages", value=[
+                {"role": "assistant", "content": (
+                    "Hi, I am Spatchat. I can help you explore your raster—ask about CRS, resolution, extent, or calculate metrics.
+Please upload a raster to begin."
+                )}
+            ])
+            question_input = gr.Textbox(label="Ask Spatchat", placeholder="e.g., Calculate edge density?", lines=1)
+            ask_button = gr.Button("Ask")
+            clear_button = gr.Button("Clear Chat")
 
-    # event bindings
-    file_input.change(preview_raster, inputs=file_input, outputs=raster_output)
-    file_input.change(on_upload, inputs=[file_input, chatbot], outputs=chatbot)
-    clear_button.click(lambda: initial_history, inputs=None, outputs=chatbot)
-    ask_button.click(analyze_raster, inputs=[file_input, question_input, chatbot], outputs=chatbot)
-    question_input.submit(analyze_raster, inputs=[file_input, question_input, chatbot], outputs=chatbot)
-    question_input.submit(lambda: "", None, question_input)
+    # Event bindings
+    file_input.change(fn=preview_raster, inputs=file_input, outputs=raster_output)
+    file_input.change(fn=on_upload, inputs=[file_input, chatbot], outputs=chatbot)
+    clear_raster_button.click(fn=clear_raster, inputs=None, outputs=[file_input, raster_output])
+    question_input.submit(fn=analyze_raster, inputs=[file_input, question_input, chatbot], outputs=chatbot)
+    ask_button.click(fn=analyze_raster, inputs=[file_input, question_input, chatbot], outputs=chatbot)
+    question_input.submit(fn=lambda: "", inputs=None, outputs=question_input)
+    ask_button.click(fn=lambda: "", inputs=None, outputs=question_input)
+    clear_button.click(fn=lambda: [], inputs=None, outputs=chatbot)
 
 iface.launch()
