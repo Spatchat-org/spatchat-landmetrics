@@ -191,7 +191,7 @@ with gr.Blocks(title="Spatchat") as iface:
 
     file_input = gr.File(label="Upload GeoTIFF", type="filepath")
     raster_output = gr.Plot(label="Raster Preview")
-    chatbot = gr.Chatbot(value=initial_history, label="messages")
+    chatbot = gr.Chatbot(value=initial_history, label="Spatchat Dialog", type="messages")
     question_input = gr.Textbox(label="Ask Spatchat", placeholder="e.g., Calculate edge density?", lines=1)
     ask_button = gr.Button("Ask")
     clear_button = gr.Button("Clear Chat")
