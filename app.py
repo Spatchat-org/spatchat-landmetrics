@@ -46,8 +46,9 @@ def preview_raster(file):
     try:
         with rasterio.open(file.name) as src:
             raw = src.read(1)
-        # map strings to integer codes if needed
-        if raw.dtype.kind in ('U','S','O'):
+            tags = src.tags()
+        # Map strings to integer codes if needed
+        if raw.dtype.kind in ('U', 'S', 'O'):
             raw_str = raw.astype(str)
             uniq = np.unique(raw_str[raw_str != ''])
             name2code = {n: i+1 for i, n in enumerate(uniq)}
@@ -72,16 +73,16 @@ def preview_raster(file):
         return fig
     except Exception:
         fig, ax = plt.subplots(figsize=(5, 5))
-        ax.text(0.5, 0.5, "🗂️ No raster loaded.", fontsize=12, ha='center', va='center', color='gray')
-        ax.set_title("Raster Preview", fontsize=14, color='dimgray')
+        ax.text(0.5, 0.5, "🗂️ No raster loaded.", ha='center', va='center', color='gray')
+        ax.set_title("Raster Preview", color='dimgray')
         ax.axis('off')
         return fig
 
 # --- Clear raster ---
 def clear_raster():
     fig, ax = plt.subplots(figsize=(5, 5))
-    ax.text(0.5, 0.5, "🗂️ No raster loaded.", fontsize=12, ha='center', va='center', color='gray')
-    ax.set_title("Raster Preview", fontsize=14, color='dimgray')
+    ax.text(0.5, 0.5, "🗂️ No raster loaded.", ha='center', va='center', color='gray')
+    ax.set_title("Raster Preview", color='dimgray')
     ax.axis('off')
     return None, gr.update(value=fig, visible=True)
 
@@ -99,16 +100,13 @@ def on_upload(file, history):
 
 # --- Unified LLM-powered analyzer with string handling ---
 def analyze_raster(file, question, history):
-    import re
-    # append user message
     history = history + [{"role": "user", "content": question}]
-    # system prompt
     messages = [
         {"role": "system", "content": (
-            "You are Spatchat, a helpful assistant that explains landscape metrics and describes raster properties.\n"
-            "Use rasterio for metadata (CRS, resolution, extent, bands, nodata) and pylandstats for metrics.\n"
-            "If the user explicitly requests metrics, calculate landscape- and class-level metrics.\n"
-            "Otherwise answer questions (e.g., resolution, extent) directly or list metrics on request."
+            "You are Spatchat, a helpful assistant that explains landscape metrics "
+            "and describes raster properties. Use rasterio for metadata (CRS, resolution, extent, bands, nodata) "
+            "and pylandstats for metrics. If the user explicitly requests metrics, compute both landscape- and class-level. "
+            "Otherwise answer metadata queries directly or list metrics on request."
         )},
         *history
     ]
@@ -117,68 +115,88 @@ def analyze_raster(file, question, history):
 
     lower_q = question.lower()
 
-    # fast-path: resolution
-    if file is not None and re.search(r"\bresolution\b", lower_q):
+    # Metadata fast-path
+    if file is not None and re.search(r"\b(resolution|crs|extent|band|nodata)\b", lower_q):
         with rasterio.open(file.name) as src:
             x_res, y_res = src.res
-            # use linear_units instead of axis_info
+            crs = src.crs
+            extent = src.bounds
+            bands = src.count
+            nodata = src.nodata
             unit = getattr(src.crs, 'linear_units', 'unit')
-        return history + [{"role": "assistant", "content": f"The native resolution is {x_res:.2f} × {y_res:.2f} {unit} per pixel."}]
+        parts = []
+        if 'resolution' in lower_q:
+            parts.append(f"Resolution: {x_res:.2f} × {y_res:.2f} {unit} per pixel")
+        if 'crs' in lower_q:
+            parts.append(f"CRS: {crs}")
+        if 'extent' in lower_q:
+            parts.append(f"Extent: {extent}")
+        if 'band' in lower_q:
+            parts.append(f"Bands: {bands}")
+        if 'nodata' in lower_q:
+            parts.append(f"NoData value: {nodata}")
+        return history + [{"role": "assistant", "content": ", ".join(parts)}]
 
-    # list metrics
+    # Metrics catalog
     if re.search(r"\b(list|available|which).*metrics\b", lower_q):
-        cats = {
+        categories = {
             "Landscape": ["contag","shdi","shei","mesh","lsi","tca"],
             "Class": ["pland","np","pd","lpi","total_edge","edge_density"],
             "Patch": ["area","perim","para","shape","frac","enn","core","nca","cai"]
         }
         lines = []
-        for cat, keys in cats.items():
+        for cat, keys in categories.items():
             lines.append(f"**{cat}-level metrics:**")
             for k in keys:
                 lines.append(f"- {metric_definitions[k][0]} (`{k}`): {metric_definitions[k][1]}")
         return history + [{"role": "assistant", "content": "Here are available metrics:\n" + "\n".join(lines)}]
 
-    # detect compute
-    if re.search(r"\b(calculate|compute|metrics|density|number|what is|show)\b", lower_q):
+    # Compute metrics
+    if re.search(r"\b(calculate|compute|metrics|density|number|show)\b", lower_q):
         with rasterio.open(file.name) as src:
             raw = src.read(1)
-            crs = src.crs
             x_res, y_res = src.res
+            crs = src.crs
             extent = src.bounds
             bands = src.count
             nodata = src.nodata
-        # map strings
-        if raw.dtype.kind in ('U','S','O'):
+        if raw.dtype.kind in ('U', 'S', 'O'):
             raw_str = raw.astype(str)
-            uniq = np.unique(raw_str[raw_str!=''])
-            name2code = {n:i+1 for i,n in enumerate(uniq)}
-            code2name = {c:n for n,c in name2code.items()}
+            uniq = np.unique(raw_str[raw_str != ''])
+            name2code = {n: i+1 for i, n in enumerate(uniq)}
+            code2name = {c: n for n, c in name2code.items()}
             arr = np.zeros_like(raw, dtype=int)
-            for n,c in name2code.items():
-                arr[raw_str==n] = c
+            for n, c in name2code.items():
+                arr[raw_str == n] = c
         else:
             arr = raw
-            code2name = {int(v):f'Class {int(v)}' for v in np.unique(arr[arr!=0])}
-        # pass res instead of resolution
-        landscape = Landscape(arr, res=x_res, nodata=0)
+            code2name = {int(v): f'Class {int(v)}' for v in np.unique(arr[arr != 0])}
+        landscape = Landscape(arr, res=(x_res, y_res), nodata=0)
         df_land = landscape.compute_landscape_metrics_df()
         df_class = landscape.compute_class_metrics_df()
-        land_txt = f"Patch Density: {df_land['patch_density'][0]:.4f}\nEdge Density: {df_land['edge_density'][0]:.4f}\n"
-        df_class.insert(0,'class_name', df_class.index.to_series().map(code2name))
-        df_class = df_class.reset_index(drop=True)
-        class_txt = df_class.to_string(index=False)
-        header = f"CRS: {crs}\nResolution: {x_res:.2f}×{y_res:.2f}\nExtent: {extent}\nBands: {bands}\nNoData: {nodata}\n\n"
-        return history + [{"role": "assistant", "content": header + f"**Landscape-level metrics:**\n{land_txt}\n**Class-level metrics:**\n{class_txt}"}]
+        land_txt = (
+            f"Patch Density: {df_land['patch_density'][0]:.4f}\n"
+            f"Edge Density: {df_land['edge_density'][0]:.4f}\n"
+        )
+        df_class.insert(0, 'class_name', df_class.index.to_series().map(code2name))
+        class_txt = df_class.reset_index(drop=True).to_string(index=False)
+        header = (
+            f"CRS: {crs}\n"
+            f"Resolution: {x_res:.2f}×{y_res:.2f}\n"
+            f"Extent: {extent}\n"
+            f"Bands: {bands}\n"
+            f"NoData: {nodata}\n\n"
+        )
+        body = f"**Landscape-level metrics:**\n{land_txt}\n**Class-level metrics:**\n{class_txt}"
+        return history + [{"role": "assistant", "content": header + body}]
 
-    # fallback to LLM
+    # Fallback to LLM
     resp = client.chat.completions.create(
         model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
         messages=messages,
         temperature=0.4
     )
     return history + [{"role": "assistant", "content": resp.choices[0].message.content}]
-
 
 # --- UI layout ---
 with gr.Blocks(title="Spatchat") as iface:
