@@ -41,33 +41,33 @@ metric_definitions = {
     "total_edge": ("Total Edge (TE)", "Total length of all patch edges.")
 }
 
-# --- Raster preview with class-name mapping ---
+# --- Raster preview ---
 def preview_raster(file):
     try:
         with rasterio.open(file.name) as src:
-            raw = src.read(1)
-        if raw.dtype.kind in ('U','S','O'):
-            raw_str = raw.astype(str)
-            uniq = np.unique(raw_str[raw_str!=''])
-            name2code = {n: i+1 for i, n in enumerate(uniq)}
-            code2name = {c: n for n, c in name2code.items()}
-            data = np.zeros_like(raw, dtype=int)
+            data = src.read(1)
+        # Map string categories if present
+        if data.dtype.kind in ('U', 'S', 'O'):
+            strs = data.astype(str)
+            cats = np.unique(strs[strs != ''])
+            name2code = {n: i+1 for i, n in enumerate(cats)}
+            code2name = {v: k for k, v in name2code.items()}
+            arr = np.zeros_like(data, dtype=int)
             for n, c in name2code.items():
-                data[raw_str == n] = c
-            labels = [code2name[c] for c in sorted(code2name)]
-            vals = sorted(code2name)
+                arr[strs == n] = c
+            labels = [code2name[i] for i in sorted(code2name)]
         else:
-            data = raw
-            vals = np.unique(data[data != 0]).tolist()
+            arr = data
+            vals = np.unique(arr[arr != 0])
             labels = [f"Class {int(v)}" for v in vals]
-        colors = plt.cm.tab10(np.linspace(0, 1, len(vals)))
+        colors = plt.cm.tab10(np.linspace(0, 1, len(labels)))
         fig, ax = plt.subplots(figsize=(5, 5))
-        ax.imshow(data, cmap='tab10', interpolation='nearest')
+        ax.imshow(arr, cmap='tab10', interpolation='nearest')
         ax.axis('off')
-        handles = [mpatches.Patch(color=colors[i], label=labels[i]) for i in range(len(vals))]
-        ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
+        handles = [mpatches.Patch(color=colors[i], label=labels[i]) for i in range(len(labels))]
+        ax.legend(handles=handles, loc='lower left', fontsize='small')
         return fig
-    except Exception:
+    except:
         fig, ax = plt.subplots(figsize=(5, 5))
         ax.text(0.5, 0.5, '🗂️ No raster loaded.', ha='center', va='center', color='gray')
         ax.axis('off')
@@ -78,14 +78,14 @@ def clear_raster():
     fig, ax = plt.subplots(figsize=(5, 5))
     ax.text(0.5, 0.5, '🗂️ No raster loaded.', ha='center', va='center', color='gray')
     ax.axis('off')
-    return None, gr.update(value=fig, visible=True)
+    return None, gr.update(value=fig)
 
 # --- Post-upload prompt ---
 def on_upload(file, history):
-    if file is not None:
-        return history + [
-            {"role": "assistant", "content": "Awesome! I can see your raster now. You can ask me to calculate edge density or other metrics."}
-        ]
+    if file:
+        return history + [{"role": "assistant", "content": (
+            "Awesome! Raster uploaded. Ask me to calculate any metric, e.g. 'calculate np' or 'what is contag'"
+        )}]
     return history
 
 # --- Analyzer ---
@@ -99,92 +99,79 @@ def analyze_raster(file, question, history):
             x_res, y_res = src.res
             crs = src.crs
             ext = src.bounds
-            bcount = src.count
-            nod = src.nodata
+            bands = src.count
+            nodata = src.nodata
             unit = getattr(src.crs, 'linear_units', 'unit')
-        parts = []
+        replies = []
         if 'resolution' in lower_q:
-            parts.append(f"Resolution: {x_res:.2f} × {y_res:.2f} {unit}")
+            replies.append(f"Resolution: {x_res:.2f} × {y_res:.2f} {unit}")
         if 'crs' in lower_q:
-            parts.append(f"CRS: {crs}")
+            replies.append(f"CRS: {crs}")
         if 'extent' in lower_q:
-            parts.append(f"Extent: {ext}")
+            replies.append(f"Extent: {ext}")
         if 'bands' in lower_q:
-            parts.append(f"Bands: {bcount}")
+            replies.append(f"Bands: {bands}")
         if 'nodata' in lower_q:
-            parts.append(f"NoData: {nod}")
-        return history + [{"role": "assistant", "content": "; ".join(parts)}], ""
+            replies.append(f"NoData: {nodata}")
+        return history + [{"role": "assistant", "content": "; ".join(replies)}], ""
 
-    # List metrics
+    # List available metrics
     if re.search(r"\b(what|which|list|available).*metrics\b", lower_q):
-        cats = {
-            "Landscape": ["contag", "shdi", "shei", "mesh", "lsi", "tca"],
-            "Class": ["pland", "np", "pd", "lpi", "total_edge", "edge_density"],
-            "Patch": ["area", "perim", "para", "shape", "frac", "enn", "core", "nca", "cai"]
-        }
         lines = []
-        for lvl, keys in cats.items():
+        for lvl, keys in {"Landscape": ["contag","shdi","shei","mesh","lsi","tca"],
+                          "Class": ["pland","np","pd","lpi","total_edge","edge_density"],
+                          "Patch": ["area","perim","para","shape","frac","enn","core","nca","cai"]}.items():
             lines.append(f"**{lvl}-level metrics:**")
             for k in keys:
                 lines.append(f"- {metric_definitions[k][0]} (`{k}`)")
         return history + [{"role": "assistant", "content": "\n".join(lines)}], ""
 
-    # Compute a specific metric dynamically
-    # Find if any metric code is mentioned
-    metric_keys = list(metric_definitions.keys())
-    requested = [k for k in metric_keys if re.search(fr"\b{k}\b", lower_q)]
-    if file and requested:
-        key = requested[0]
-        with rasterio.open(file.name) as src:
-            raw = src.read(1)
-            x_res, y_res = src.res
-        # map strings to ints if needed
-        if raw.dtype.kind in ('U','S','O'):
-            raw_str = raw.astype(str)
-            uniq = np.unique(raw_str[raw_str!=''])
-            name2code = {n:i+1 for i,n in enumerate(uniq)}
-            code2name = {c:n for n,c in name2code.items()}
-            arr = np.zeros_like(raw, dtype=int)
-            for n,c in name2code.items():
-                arr[raw_str==n] = c
-        else:
-            arr = raw
-            code2name = {int(v):f"Class {int(v)}" for v in np.unique(arr[arr!=0])}
-        landscape = Landscape(arr, res=(x_res, y_res), nodata=0)
-        df_land = landscape.compute_landscape_metrics_df()
-        df_class = landscape.compute_class_metrics_df()
-        # pull landscape value
-        land_val = df_land.get(key if key!='ed' else 'edge_density', [None])[0]
-        # pull class-level
-        class_series = df_class[key if key!='ed' else 'edge_density']
-        df_class.insert(0, 'class_name', df_class.index.to_series().map(code2name))
-        df_sub = df_class[['class_name', key if key!='ed' else 'edge_density']]
-        table = df_sub.to_markdown(index=False)
-        # header metadata
-        with rasterio.open(file.name) as src:
-            crs = src.crs
-            ext = src.bounds
-            bcount = src.count
-            nod = src.nodata
-        hdr = (f"CRS: {crs}\nResolution: {x_res:.2f}×{y_res:.2f}\n"
-               f"Extent: {ext}\nBands: {bcount}\nNoData: {nod}\n\n")
-        # metric names
-        name = metric_definitions[key][0]
-        content = (f"**Landscape-level {name}:**\n{land_val:.4f}\n\n"
-                   f"**Class-level {name}:**\n{table}")
-        return history + [{"role": "assistant", "content": hdr + content}], ""
+    # Compute any requested metric
+    if file:
+        # detect metrics by code or name
+        requested = []
+        for key in metric_definitions:
+            phrase = key.replace('_', ' ')
+            if re.search(rf"\b{key}\b|\b{phrase}\b", lower_q):
+                requested.append(key)
+        if requested:
+            key = requested[0]
+            # read and map
+            with rasterio.open(file.name) as src:
+                raw = src.read(1)
+                x_res, y_res = src.res
+            if raw.dtype.kind in ('U', 'S', 'O'):
+                rs = raw.astype(str)
+                cats = np.unique(rs[rs!=''])
+                name2code = {n:i+1 for i,n in enumerate(cats)}
+                code2name = {v:k for k,v in name2code.items()}
+                arr = np.zeros_like(raw, dtype=int)
+                for n,c in name2code.items(): arr[rs==n]=c
+            else:
+                arr = raw
+                code2name = {int(v):f"Class {int(v)}" for v in np.unique(arr[arr!=0])}
+            ls = Landscape(arr, res=(x_res, y_res), nodata=0)
+            df_land = ls.compute_landscape_metrics_df()
+            df_class = ls.compute_class_metrics_df()
+            val = df_land[key if key!='ed' else 'edge_density'][0]
+            df_class.insert(0, 'class_name', df_class.index.to_series().map(code2name))
+            tab = df_class[['class_name', key if key!='ed' else 'edge_density']].to_markdown(index=False)
+            meta = f"CRS: {crs}\nResolution: {x_res:.2f}×{y_res:.2f}\nExtent: {ext}\nBands: {bands}\nNoData: {nodata}\n\n"
+            name = metric_definitions[key][0]
+            out = (f"**Landscape-level {name}:** {val:.4f}\n\n"
+                   f"**Class-level {name}:**\n{tab}")
+            return history + [{"role": "assistant", "content": meta + out}], ""
 
-    # Fallback LLM
+    # Fallback conversational
     messages = [
         {"role": "system", "content": (
-            "You are Spatchat, a helpful assistant that explains landscape metrics and describes raster properties."
-            "Use rasterio and pylandstats for calculations when explicitly asked."
-            "For general questions not related to a direct metric computation, respond conversationally with clear explanations and do not provide code examples unless the user requests them."
+            "You are Spatchat, a helpful assistant explaining landscape metrics and raster properties."
+            " Use computational logic when users ask to calculate specific metrics, otherwise reply conversationally without code."
         )},
         *history
     ]
     if file:
-        messages.insert(1, {"role": "system", "content": "A raster file is available."})
+        messages.insert(1, {"role": "system", "content": "Raster file is available for analysis."})
     resp = client.chat.completions.create(
         model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
         messages=messages,
@@ -195,37 +182,53 @@ def analyze_raster(file, question, history):
 # --- UI layout ---
 with gr.Blocks(title="Spatchat") as iface:
     gr.HTML("""
-    <head><link rel=\"icon\" type=\"image/png\" href=\"file=logo1.png\"></head>
-    """ )
-    gr.Image(value="logo/logo_long1.png", show_label=False, show_download_button=False, show_share_button=False, type="filepath", elem_id="logo-img")
+    <head>
+        <link rel=\"icon\" type=\"image/png\" href=\"file=logo1.png\">
+    </head>
+    """)
+    gr.Image(
+        value="logo/logo_long1.png",
+        show_label=False,
+        show_download_button=False,
+        show_share_button=False,
+        type="filepath",
+        elem_id="logo-img"
+    )
     gr.HTML("""
-    <style>#logo-img img{height:90px;margin:10px 50px;border-radius:6px;}</style>
-    """ )
+    <style>
+    #logo-img img {
+        height: 90px;
+        margin: 10px 50px 10px 10px;
+        border-radius: 6px;
+    }
+    </style>
+    """)
     gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant")
     gr.HTML('''
-    <div style="margin:-10px 0 15px;">
-      <input value="https://spatchat.org/browse/?room=landmetrics" readonly style="width:50%;padding:5px;background:#f8f8f8;border:1px solid #ccc;border-radius:4px;">
-      <button onclick="navigator.clipboard.writeText(this.previousElementSibling.value)" style="padding:5px 10px;background:#007BFF;color:#fff;border:none;border-radius:4px;cursor:pointer;">📋Copy</button>
-      <span style="margin-left:10px;font-size:14px;">Share: <a href="https://twitter.com/intent/tweet?...">🐦</a> | <a href="https://facebook.com/sharer?...">📘</a></span>
+    <div style="margin-top:-10px;margin-bottom:15px;">
+      <input id="shareLink" value="https://spatchat.org/browse/?room=landmetrics" readonly style="width:50%;padding:5px;background:#f8f8f8;border:1px solid #ccc;border-radius:4px;">
+      <button onclick="navigator.clipboard.writeText(document.getElementById('shareLink').value)" style="padding:5px 10px;background:#007BFF;color:#fff;border:none;border-radius:4px;cursor:pointer;">📋 Copy Link</button>
+      <span style="margin-left:10px;font-size:14px;">Share: <a href="https://twitter.com/intent/tweet?url=https://spatchat.org/browse/?room=landmetrics">🐦</a> | <a href="https://www.facebook.com/sharer/sharer.php?u=https://spatchat.org/browse/?room=landmetrics">📘</a></span>
     </div>
     ''')
     gr.Markdown("""
-    <div style="font-size:14px;">©2025 Ho Yi Wan & Logan Hysen. Cite: Wan, H.Y. & Hysen, L. (2025).</div>
-    """ )
+    <div style="font-size:14px;">© 2025 Ho Yi Wan & Logan Hysen. If used in research, please cite: Wan, H.Y. & Hysen, L. (2025).</div>
+    """
+    )
     with gr.Row():
         with gr.Column(scale=1):
             file_input = gr.File(label="Upload GeoTIFF", type="filepath")
-            raster_output = gr.Plot(label="Raster Preview")
+            raster_plot = gr.Plot(label="Raster Preview")
             clear_btn = gr.Button("Clear Raster")
         with gr.Column(scale=1):
-            chatbot = gr.Chatbot(value=[{"role":"assistant","content":"Hi, I'm Spatchat. Upload a raster to begin."}], type="messages", label="Spatchat Dialog")
-            txt = gr.Textbox(label="Ask Spatchat", placeholder="e.g., Calculate edge density?", lines=1)
-            ask = gr.Button("Ask")
-            clr = gr.Button("Clear Chat")
-    file_input.change(preview_raster, inputs=file_input, outputs=raster_output)
+            chatbot = gr.Chatbot(value=[{"role":"assistant","content":"Hi! Upload a raster to begin."}], type="messages", label="Spatchat Dialog")
+            question = gr.Textbox(label="Ask Spatchat", placeholder="e.g., calculate edge density?", lines=1)
+            ask_btn = gr.Button("Ask")
+            clear_chat = gr.Button("Clear Chat")
+    file_input.change(preview_raster, inputs=file_input, outputs=raster_plot)
     file_input.change(on_upload, inputs=[file_input, chatbot], outputs=chatbot)
-    clear_btn.click(clear_raster, inputs=None, outputs=[file_input, raster_output])
-    txt.submit(analyze_raster, inputs=[file_input, txt, chatbot], outputs=[chatbot, txt])
-    ask.click(analyze_raster, inputs=[file_input, txt, chatbot], outputs=[chatbot, txt])
-    clr.click(lambda: [{'role':'assistant','content':"Hi, I'm Spatchat. Upload a raster to begin."}], inputs=None, outputs=chatbot)
+    clear_btn.click(clear_raster, inputs=None, outputs=[file_input, raster_plot])
+    question.submit(analyze_raster, inputs=[file_input, question, chatbot], outputs=[chatbot, question])
+    ask_btn.click(analyze_raster, inputs=[file_input, question, chatbot], outputs=[chatbot, question])
+    clear_chat.click(lambda: [{"role":"assistant","content":"Hi! Upload a raster to begin."}], inputs=None, outputs=chatbot)
 iface.launch()
