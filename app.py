@@ -161,55 +161,64 @@ def list_metrics(history):
     return history + [{"role":"assistant","content":"\n".join(lines).strip()}], ""
 
 def compute_metric(file, key, history):
-    # 1️⃣ Load raw + metadata
+    # 1️⃣ read the raw band and metadata
     with rasterio.open(file.name) as src:
-        raw    = src.read(1)
-        x_res, y_res = src.res
-        nodata = src.nodata or 0
+        raw     = src.read(1)
+        x_res,y_res = src.res
+        nodata  = src.nodata or 0
 
-    # 2️⃣ Remap strings → ints if needed
+    # 2️⃣ remap string‐coded classes → ints if needed
     if raw.dtype.kind in ('U','S','O'):
         data_str     = raw.astype(str)
         unique_names = np.unique(data_str[data_str != ""])
-        name2code    = {nm: i+1 for i,nm in enumerate(unique_names)}
-        arr = np.zeros_like(raw, dtype=int)
+        name2code    = {nm: i+1 for i, nm in enumerate(unique_names)}
+        arr          = np.zeros_like(raw, dtype=int)
         for nm, code in name2code.items():
             arr[data_str == nm] = code
-        ls = Landscape(arr, res=(x_res, y_res), nodata=0)
-        code2name = {v:k for k,v in name2code.items()}
+        ls           = Landscape(arr, res=(x_res, y_res), nodata=0)
+        code2name    = {v:k for k,v in name2code.items()}
     else:
-        ls = Landscape(file.name, res=(x_res, y_res), nodata=nodata)
+        ls        = Landscape(file.name, res=(x_res, y_res), nodata=nodata)
         code2name = None
 
-    # 3️⃣ Prepare labels
+    # 3️⃣ compute class‐level DF (always works)
+    df_cls  = ls.compute_class_metrics_df()
+
+    # 4️⃣ try to compute landscape‐level DF, skip on class-only metrics
+    try:
+        df_land = ls.compute_landscape_metrics_df()
+    except Exception:
+        df_land = None
+
+    # 5️⃣ lookup human name + DF column
     metric_name, _ = metric_definitions[key]
-    col = col_map.get(key, key)
+    col            = col_map.get(key, key)
 
-    # 4️⃣ Landscape‑level
+    # 6️⃣ landscape‐level output (only if df_land exists *and* col is in it,
+    #    or key=="np" where we sum class‐level counts)
+    land_part = ""
     if key == "np":
-        # sum of patches across classes
-        df_cls = ls.compute_class_metrics_df(metrics=["number_of_patches"])
-        land_val = int(df_cls["number_of_patches"].sum())
-    elif key == "edge_density":
-        land_val = ls.edge_density()
-    else:
-        land_df = ls.compute_landscape_metrics_df(metrics=[col])
-        land_val = land_df[col].iloc[0]
-    land_part = f"**Landscape-level {metric_name}:** {land_val:.4f}\n\n"
+        # number of patches: sum across all classes
+        val = int(df_cls["number_of_patches"].sum())
+        land_part = f"**Landscape-level {metric_name}:** {val}\n\n"
+    elif df_land is not None and col in df_land.columns:
+        val = df_land[col].iloc[0]
+        land_part = f"**Landscape-level {metric_name}:** {val:.4f}\n\n"
 
-    # 5️⃣ Class‑level
-    cls_df = ls.compute_class_metrics_df(metrics=[col])
-    df2 = cls_df.rename_axis("class_val").reset_index()
+    # 7️⃣ build class‐level table
+    df2 = df_cls.rename_axis("code").reset_index()
+
     if code2name:
-        df2["class_name"] = df2["class_val"].map(lambda c: f"{c}: {code2name.get(c,'Unknown')}")
+        df2["class_name"] = df2["code"].map(lambda c: f"{c}: {code2name[c]}")
     else:
-        df2["class_name"] = df2["class_val"].map(lambda c: f"Class {int(c)}")
+        df2["class_name"] = df2["code"].map(lambda c: f"Class {int(c)}")
 
     if col in df2.columns:
         tbl = df2[["class_name", col]].to_markdown(index=False)
     else:
         tbl = "(not available at class level)"
 
+    # 8️⃣ return full response
     content = land_part + f"**Class-level {metric_name}:**\n{tbl}"
     return history + [{"role":"assistant","content":content}], ""
 
