@@ -76,80 +76,71 @@ col_map = {
 
 # --- Raster preview & clear ---
 
-def preview_raster(file):
-    # helper to draw the empty‐raster placeholder
-    def no_raster_fig():
-        fig, ax = plt.subplots(figsize=(5, 5))
-        ax.text(
-            0.5, 0.5,
-            "🗂️ No raster loaded.",
-            ha='center', va='center',
-            color='gray',
-            fontsize=14
-        )
-        ax.set_title("Raster Preview", color='dimgray')
-        ax.axis('off')
-        return fig
-
+def preview_raster(file, mapping_file):
+    # fallback if no raster
     if file is None:
         return no_raster_fig()
 
-    try:
-        # 1) Read the data and metadata
-        with rasterio.open(file.name) as src:
-            raw    = src.read(1)
-            nodata = src.nodata or 0
-            # Try to get GDAL categories (value→name)
-            try:
-                cats = src.categories(1) or {}
-            except Exception:
-                cats = {}
+    # 1) Try to load your mapping CSV into a dict[int→str]
+    code2name = {}
+    if mapping_file is not None:
+        try:
+            df_map = pd.read_csv(mapping_file.name)
+            # expect columns: code,name
+            code2name = {int(r['code']): str(r['name']) for _, r in df_map.iterrows()}
+        except Exception as e:
+            print("mapping load error:", e)
 
-        # 2) Decide which path to take
-        if cats:
-            # already integer codes with category names
-            data   = raw.astype(int)
-            vals   = sorted(cats.keys())
-            labels = [f"{v}: {cats[v]}" for v in vals]
-            n      = len(vals)
-            colors = plt.cm.tab10(np.linspace(0, 1, n))
+    # 2) Read the raster band
+    with rasterio.open(file.name) as src:
+        raw    = src.read(1)
+        nodata = src.nodata or 0
+        cats   = src.categories(1) or {}
 
-        elif raw.dtype.kind in ('U', 'S', 'O'):
-            # string‑typed raster → map names → codes
-            data_str     = raw.astype(str)
-            unique_names = np.unique(data_str[data_str != ""])
-            name2code    = {name: i+1 for i, name in enumerate(unique_names)}
-            data         = np.zeros_like(raw, dtype=int)
-            for name, code in name2code.items():
-                data[data_str == name] = code
-            n      = len(unique_names)
-            labels = [f"{i+1}: {unique_names[i]}" for i in range(n)]
-            colors = plt.cm.tab10(np.linspace(0, 1, n))
+    # 3) If mapping_file provided, use that first
+    if code2name:
+        data   = raw.astype(int)
+        vals   = sorted(code2name.keys())
+        labels = [f"{v}: {code2name[v]}" for v in vals]
+        n      = len(vals)
+        colors = plt.cm.tab10(np.linspace(0,1,n))
 
-        else:
-            # plain numeric raster
-            data   = raw
-            vals   = np.unique(data[data != nodata])
-            n      = len(vals)
-            labels = [f"{int(v)}: Class {int(v)}" for v in vals]
-            colors = plt.cm.tab10(np.linspace(0, 1, n))
+    # 4) Else if there’s a GDAL RAT
+    elif cats:
+        data   = raw.astype(int)
+        vals   = sorted(cats.keys())
+        labels = [f"{v}: {cats[v]}" for v in vals]
+        n      = len(vals)
+        colors = plt.cm.tab10(np.linspace(0,1,n))
 
-        # 3) Plot
-        fig, ax = plt.subplots(figsize=(5, 5))
-        ax.imshow(
-            data,
-            cmap='tab10',
-            interpolation='nearest',
-            vmin=1,
-            vmax=n
-        )
-        ax.set_title("Uploaded Raster")
-        ax.axis('off')
+    # 5) Else if string‐typed
+    elif raw.dtype.kind in ('U','S','O'):
+        data_str     = raw.astype(str)
+        unique_names = np.unique(data_str[data_str!=""])
+        name2code    = {nm:i+1 for i,nm in enumerate(unique_names)}
+        data         = np.zeros_like(raw, dtype=int)
+        for nm, code in name2code.items():
+            data[data_str==nm] = code
+        labels = [f"{i+1}: {unique_names[i]}" for i in range(len(unique_names))]
+        n      = len(unique_names)
+        colors = plt.cm.tab10(np.linspace(0,1,n))
 
-        # 4) Legend
-        handles = [mpatches.Patch(color=colors[i], label=labels[i]) for i in range(n)]
-        ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
-        return fig
+    # 6) Otherwise numeric default
+    else:
+        data   = raw
+        vals   = np.unique(data[data!=nodata])
+        labels = [f"{int(v)}: Class {int(v)}" for v in vals]
+        n      = len(vals)
+        colors = plt.cm.tab10(np.linspace(0,1,n))
+
+    # 7) Plot exactly as before
+    fig, ax = plt.subplots(figsize=(5,5))
+    ax.imshow(data, cmap='tab10', interpolation='nearest', vmin=1, vmax=n)
+    ax.set_title("Uploaded Raster")
+    ax.axis('off')
+    handles = [mpatches.Patch(color=colors[i], label=labels[i]) for i in range(n)]
+    ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
+    return fig
 
     except Exception as e:
         print("preview_raster error:", e)
@@ -196,57 +187,62 @@ def list_metrics(history):
         lines.append("")
     return history + [{"role":"assistant","content":"\n".join(lines).strip()}], ""
 
-def compute_metric(file, key, history):
-    # 1) Read raw + res + categories
+def compute_metric(file, key, history, mapping_file):
+    # 1) Load user’s code→name CSV if provided
+    code2name = {}
+    if mapping_file is not None:
+        try:
+            df_map = pd.read_csv(mapping_file.name)
+            # expect columns: code,name
+            code2name = {int(r['code']): str(r['name']) for _, r in df_map.iterrows()}
+        except Exception as e:
+            print("mapping load error:", e)
+
+    # 2) Read raster + resolution
     with rasterio.open(file.name) as src:
         raw    = src.read(1)
-        x_res,y_res = src.res
+        x_res, y_res = src.res
         nodata = src.nodata or 0
-        cats   = src.categories(1) or {}
 
-    # 2) Build a Landscape object from ints
-    if cats:
-        # use raw directly: its values are already 1..N codes
-        arr = raw.astype(int)
-        code2name = cats  # mapping value→string
-        ls = Landscape(arr, res=(x_res,y_res), nodata=0)
-
-    elif raw.dtype.kind in ('U','S','O'):
-        # map strings to 1..N codes
-        data_str = raw.astype(str)
-        unique_names = np.unique(data_str[data_str!=""])
-        name2code = {name: i+1 for i,name in enumerate(unique_names)}
+    # 3) Remap string‐typed categories → ints if needed
+    if raw.dtype.kind in ('U','S','O'):
+        data_str    = raw.astype(str)
+        unique_names = np.unique(data_str[data_str != ""])
+        name2code   = {nm: i+1 for i, nm in enumerate(unique_names)}
         arr = np.zeros_like(raw, dtype=int)
-        for name,code in name2code.items():
-            arr[data_str==name] = code
-        code2name = {v:k for k,v in name2code.items()}
-        ls = Landscape(arr, res=(x_res,y_res), nodata=0)
-
+        for nm, code in name2code.items():
+            arr[data_str == nm] = code
+        # override any existing code2name
+        code2name = {v: k for k, v in name2code.items()}
+        ls = Landscape(arr, res=(x_res, y_res), nodata=0)
     else:
-        # purely numeric raster
-        ls = Landscape(file.name, res=(x_res,y_res), nodata=nodata)
-        code2name = None
+        ls = Landscape(file.name, nodata=nodata, res=(x_res, y_res))
 
-    # 3) Compute DataFrames
+    # 4) Compute metrics DataFrames
     df_land = ls.compute_landscape_metrics_df()
     df_cls  = ls.compute_class_metrics_df()
-    metric_name,_ = metric_definitions[key]
+
+    # 5) Get human‐readable metric name & df column
+    metric_name, _ = metric_definitions[key]
     col = col_map.get(key, key)
 
-    # 4) Landscape‐level text
+    # 6) Build landscape‐level text
     if key == "np":
-        lv = int(df_cls["number_of_patches"].sum())
-        land_part = f"**Landscape-level {metric_name}:** {lv}\n\n"
+        val = int(df_cls["number_of_patches"].sum())
+        land_part = f"**Landscape-level {metric_name}:** {val}\n\n"
     elif col in df_land.columns:
-        lv = df_land[col].iloc[0]
-        land_part = f"**Landscape-level {metric_name}:** {lv:.4f}\n\n"
+        val = df_land[col].iloc[0]
+        land_part = f"**Landscape-level {metric_name}:** {val:.4f}\n\n"
     else:
         land_part = ""
 
-    # 5) Class‑level table with code:name if available
+    # 7) Build class‐level table
     df2 = df_cls.rename_axis("code").reset_index()
+    # label each row as "code: name" if mapping exists
     if code2name:
-        df2["class_name"] = df2["code"].map(lambda c: f"{c}: {code2name.get(c,'Unknown')}")
+        df2["class_name"] = df2["code"].map(
+            lambda c: f"{c}: {code2name.get(c, 'Unknown')}"
+        )
     else:
         df2["class_name"] = df2["code"].map(lambda c: f"Class {int(c)}")
 
@@ -255,6 +251,7 @@ def compute_metric(file, key, history):
     else:
         tbl = "(not available at class level)"
 
+    # 8) Compose response
     content = land_part + f"**Class-level {metric_name}:**\n{tbl}"
     return history + [{"role":"assistant","content":content}], ""
 
@@ -287,7 +284,7 @@ def llm_fallback(history):
     return history + [{"role":"assistant","content":resp}], ""
 
 # --- Main handler ---
-def analyze_raster(file, question, history):
+def analyze_raster(file, mapping_file, question, history):
     hist  = history + [{"role":"user","content":question}]
     lower = question.lower()
 
@@ -348,16 +345,21 @@ with gr.Blocks(title="Spatchat") as iface:
     with gr.Row():
         with gr.Column(scale=1):
             file_input          = gr.File(label="Upload GeoTIFF", type="filepath")
+            mapping_input       = gr.File(label="Upload code→name CSV", file_types=['csv'])
             raster_output       = gr.Plot(label="Raster Preview")
             clear_raster_button = gr.Button("Clear Raster")
         with gr.Column(scale=1):
             chatbot        = gr.Chatbot(value=initial_history, type="messages",
                                        label="Spatchat Dialog")
+    question_input.submit(analyze_raster,
+                          inputs=[file_input, mapping_input, question_input, chatbot],
+                          outputs=[chatbot, question_input])
             question_input = gr.Textbox(placeholder="e.g. calculate edge density", lines=1)
             clear_button   = gr.Button("Clear Chat")
 
     # callbacks
-    file_input.change(preview_raster, inputs=file_input, outputs=raster_output)
+    file_input.change(preview_raster, inputs=[file_input, mapping_input], outputs=raster_output)
+    mapping_input.change(preview_raster, inputs=[file_input, mapping_input], outputs=raster_output)
     clear_raster_button.click(clear_raster, inputs=None,
                               outputs=[file_input, raster_output])
     question_input.submit(analyze_raster,
