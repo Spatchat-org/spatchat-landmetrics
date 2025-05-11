@@ -167,18 +167,29 @@ def answer_metadata(file, history):
     return history + [{"role":"assistant","content":text}], ""
 
 def list_metrics(history):
-    groups = {
-        "Landscape": ["contag","shdi","shei","mesh","lsi","tca"],
-        "Class":     ["pland","np","pd","lpi","te","edge_density"],
-        "Patch":     ["area","perim","para","shape","frac","enn","core","nca","cai"]
-    }
+    # 1️⃣ Define which metrics span both Landscape & Class levels
+    cross_level = ["np", "pd", "lpi", "te", "edge_density"]
+    
     lines = []
+    lines.append("**Cross‑level metrics (Landscape & Class):**")
+    for k in cross_level:
+        name, _ = metric_definitions[k]
+        lines.append(f"- {name} (`{k}`)")
+    lines.append("")
+
+    # 2️⃣ Rest of your grouped listing
+    groups = {
+        "Landscape‑only": ["contag","shdi","shei","mesh","lsi","tca"],
+        "Class‑only":     ["pland"],
+        "Patch‑only":     ["area","perim","para","shape","frac","enn","core","nca","cai"]
+    }
     for lvl, keys in groups.items():
-        lines.append(f"**{lvl}-level metrics:**")
+        lines.append(f"**{lvl} metrics:**")
         for k in keys:
-            name,_ = metric_definitions[k]
+            name, _ = metric_definitions[k]
             lines.append(f"- {name} (`{k}`)")
         lines.append("")
+
     return history + [{"role":"assistant","content":"\n".join(lines).strip()}], ""
 
 def compute_metric(file, key, history):
