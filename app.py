@@ -161,35 +161,34 @@ def list_metrics(history):
     return history + [{"role":"assistant","content":"\n".join(lines).strip()}], ""
 
 def compute_metric(file, key, history):
-    import numpy as np
-    import rasterio
+    import rasterio, numpy as np
     from pylandstats import Landscape
 
-    # 1) Read raw data + metadata
+    # 1️⃣ Read the band + geo‑metadata
     with rasterio.open(file.name) as src:
         raw    = src.read(1)
         x_res, y_res = src.res
         nodata = src.nodata or 0
 
-    # 2) Remap string classes → ints on the fly
+    # 2️⃣ On‑the‑fly map of string classes → ints
     if raw.dtype.kind in ("U","S","O"):
-        data_str     = raw.astype(str)
-        unique_names = np.unique(data_str[data_str != ""])
-        name2code    = {nm: i+1 for i, nm in enumerate(unique_names)}
-        arr = np.zeros_like(raw, dtype=int)
+        data_str = raw.astype(str)
+        uniq     = np.unique(data_str[data_str!=""])
+        name2code= {nm:i+1 for i,nm in enumerate(uniq)}
+        arr      = np.zeros_like(raw, dtype=int)
         for nm, code in name2code.items():
-            arr[data_str == nm] = code
-        ls = Landscape(arr, res=(x_res, y_res), nodata=0)
+            arr[data_str==nm] = code
+        ls = Landscape(arr, res=(x_res,y_res), nodata=0)
         code2name = {v:k for k,v in name2code.items()}
     else:
-        ls = Landscape(file.name, nodata=nodata, res=(x_res, y_res))
+        ls = Landscape(file.name, nodata=nodata, res=(x_res,y_res))
         code2name = None
 
-    # 3) Human‑readable metric name + column
+    # 3️⃣ Friendly metric name & DataFrame column
     metric_name, _ = metric_definitions[key]
     col = col_map.get(key, key)
 
-    # 4) Prepare a dict of fast helpers
+    # 4️⃣ Which metrics we can call as fast landscape helpers?
     helper_methods = {
         "pd":           "patch_density",
         "edge_density": "edge_density",
@@ -203,41 +202,56 @@ def compute_metric(file, key, history):
         "te":           "total_edge",
     }
 
-    # 5) Landscape‑level calculation
+    # 5️⃣ Which metrics are strictly class‑level only?
+    class_only = {
+        "pland",
+        "area", "perim", "para", "shape", "frac",
+        "enn", "core", "nca", "cai",
+    }
+
+    # 6️⃣ Build the landscape‐level part
     if key == "np":
-        # total number of patches across all classes
-        df_np = ls.compute_class_metrics_df(metrics=["number_of_patches"])
-        val = int(df_np["number_of_patches"].sum())
+        # sum of all class patch counts
+        df_tmp = ls.compute_class_metrics_df(metrics=["number_of_patches"])
+        val    = int(df_tmp["number_of_patches"].sum())
         land_part = f"**Landscape-level {metric_name}:** {val}\n\n"
 
     elif key in helper_methods:
-        # call the single-metric helper directly
-        fn = helper_methods[key]
+        # call the fast helper, e.g. ls.edge_density()
+        fn  = helper_methods[key]
         val = getattr(ls, fn)()
         land_part = f"**Landscape-level {metric_name}:** {val:.4f}\n\n"
 
+    elif key in class_only:
+        # no landscape‐level value for these
+        land_part = ""
+
     else:
-        # fallback: compute only that one column
+        # any other (true) landscape‐level metric
         df_land = ls.compute_landscape_metrics_df(metrics=[col])
-        val = df_land[col].iloc[0]
+        val     = df_land[col].iloc[0]
         land_part = f"**Landscape-level {metric_name}:** {val:.4f}\n\n"
 
-    # 6) Class‑level calculation (always ask for only that metric)
-    df2 = ls.compute_class_metrics_df(metrics=[col]).rename_axis("code").reset_index()
+    # 7️⃣ Compute class‐level table (always just that one col)
+    df2 = ls.compute_class_metrics_df(metrics=[col])\
+            .rename_axis("code")\
+            .reset_index()
 
-    # 7) Build human‑friendly class names
+    # 8️⃣ Friendly class names
     if code2name:
-        df2["class_name"] = df2["code"].map(lambda c: f"{c}: {code2name.get(c,'Unknown')}")
+        df2["class_name"] = df2["code"]\
+            .map(lambda c: f"{c}: {code2name.get(c,'Unknown')}")
     else:
-        df2["class_name"] = df2["code"].map(lambda c: f"Class {int(c)}")
+        df2["class_name"] = df2["code"]\
+            .map(lambda c: f"Class {int(c)}")
 
-    # 8) Format the output table (or note unavailability)
+    # 9️⃣ Format
     if col in df2.columns:
         tbl = df2[["class_name", col]].to_markdown(index=False)
     else:
         tbl = "(not available at class level)"
 
-    # 9) Return updated history + our message
+    # 🔟 Return
     content = land_part + f"**Class-level {metric_name}:**\n{tbl}"
     return history + [{"role":"assistant","content":content}], ""
 
