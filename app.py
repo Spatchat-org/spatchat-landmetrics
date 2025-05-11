@@ -77,56 +77,120 @@ def clear_raster():
 
 # --- Unified LLM-powered analyzer ---
 def analyze_raster(file, question, history):
+    import re
+
+    # 1. Append the user’s question
+    history = history + [{"role": "user", "content": question}]
+    lower_q = question.lower()
+
+    # 2. If no raster is loaded, prompt to upload
+    if file is None:
+        return history + [{
+            "role": "assistant",
+            "content": "Please upload a GeoTIFF before asking for metadata or metrics."
+        }]
+
+    # 3. Read raster metadata once
+    with rasterio.open(file.name) as src:
+        crs     = src.crs
+        x_res,y_res = src.res
+        extent  = src.bounds
+        bands   = src.count
+        nodata  = src.nodata
+        unit    = getattr(src.crs, "linear_units", "unit")
+
+    # 4. Metadata queries
+    if re.search(r"\b(resolution|crs|extent|bands|nodata)\b", lower_q):
+        parts = []
+        if "resolution" in lower_q:
+            parts.append(f"Resolution: {x_res:.2f} × {y_res:.2f} {unit}")
+        if "crs" in lower_q:
+            parts.append(f"CRS: {crs}")
+        if "extent" in lower_q:
+            parts.append(f"Extent: {extent}")
+        if "bands" in lower_q:
+            parts.append(f"Bands: {bands}")
+        if "nodata" in lower_q:
+            parts.append(f"NoData: {nodata}")
+        return history + [{
+            "role": "assistant",
+            "content": " ".join(parts)
+        }]
+
+    # 5. List available metrics
+    if re.search(r"\b(what|which|list|available).*metrics\b", lower_q):
+        cats = {
+            "Landscape": ["contag","shdi","shei","mesh","lsi","tca"],
+            "Class":     ["pland","np","pd","lpi","total_edge","edge_density"],
+            "Patch":     ["area","perim","para","shape","frac","enn","core","nca","cai"]
+        }
+        lines = []
+        for lvl, keys in cats.items():
+            lines.append(f"**{lvl}-level metrics:**")
+            for k in keys:
+                name,_ = metric_definitions[k]
+                lines.append(f"- {name} (`{k}`)")
+        return history + [{
+            "role": "assistant",
+            "content": "\n".join(lines)
+        }]
+
+    # 6. Compute a specific metric if named
+    requested = [k for k in metric_definitions if re.search(rf"\b{k}\b", lower_q)]
+    if requested:
+        key = requested[0]
+        landscape = Landscape(file.name, nodata=0)
+        df_land   = landscape.compute_landscape_metrics_df()
+        df_class  = landscape.compute_class_metrics_df()
+
+        # Landscape-level
+        name,_ = metric_definitions[key]
+        land_part = ""
+        if key in df_land.columns:
+            val = df_land[key].iloc[0]
+            land_part = f"**Landscape-level {name}:** {val:.4f}\n\n"
+
+        # Class-level
+        df_class = df_class.rename_axis("code").reset_index()
+        df_class["class_name"] = df_class["code"].map(lambda c: f"Class {int(c)}")
+        class_tbl = df_class[["class_name", key]].to_markdown(index=False)
+
+        # Metadata header
+        meta = (
+            f"CRS: {crs}\n"
+            f"Resolution: {x_res:.2f}×{y_res:.2f}\n"
+            f"Extent: {extent}\n"
+            f"Bands: {bands}\n"
+            f"NoData: {nodata}\n\n"
+        )
+
+        return history + [{
+            "role": "assistant",
+            "content": meta + land_part + f"**Class-level {name}:**\n{class_tbl}"
+        }]
+
+    # 7. LLM fallback for everything else
     messages = [
         {"role": "system", "content": (
-            "You are Spatchat, a helpful assistant that explains and calculates landscape metrics from raster files.\n"
-            "If no raster is uploaded, do not attempt to calculate anything.\n"
+            "You are Spatchat, a helpful assistant that explains landscape metrics and describes raster properties. "
+            "Use rasterio and pylandstats when asked to calculate metrics; otherwise reply conversationally."
             "If a raster is uploaded and the user asks for a metric, use pylandstats to calculate it.\n"
             "You can calculate patch metrics, class metrics, and landscape metrics using pylandstats.\n"
             "If the user asks you to calculate a metric or multiple metrics, display the results clearly. You do not need to provide detailed explanations.\n"
             "Be conversational and helpful. If the question is vague, ask the user to clarify."
         )},
-        *history,
-        {"role": "user", "content": question}
+        *history
     ]
+    # ground in uploaded raster
+    messages.insert(1, {"role":"system","content":"A raster file has been uploaded and is available."})
 
-    # Add grounding system message if raster is uploaded
-    if file is not None:
-        messages.insert(1, {
-            "role": "system",
-            "content": "A raster file has been uploaded. You may reference real landscape metrics that were computed using pylandstats."
-        })
+    response = client.chat.completions.create(
+        model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+        messages=messages,
+        temperature=0.4
+    ).choices[0].message.content
 
-    try:
-        # Inject real metrics into prompt if available
-        if file is not None:
-            landscape = Landscape(file.name, nodata=0)
-            df_patch = landscape.compute_patch_metrics_df()
-            df_class = landscape.compute_class_metrics_df()
-            df_land = landscape.compute_landscape_metrics_df()
-
-            real_metrics = (
-                f"Patch Density: {df_land.get('patch_density', [None])[0]:.4f}\n"
-                f"Edge Density: {df_land.get('edge_density', [None])[0]:.4f}\n"
-                f"Number of Patches: {df_class['number_of_patches'].sum()}\n"
-            )
-            messages[-1]['content'] += f"\n\nHere are real metrics from the uploaded raster:\n{real_metrics}"
-
-        # Get LLM response
-        response = client.chat.completions.create(
-            model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-            messages=messages,
-            temperature=0.4
-        ).choices[0].message.content
-
-    except Exception as e:
-        return history + [{"role": "user", "content": question}, {"role": "assistant", "content": f"⚠️ LLM error: {e}"}]
-
-    return history + [
-        {"role": "user", "content": question},
-        {"role": "assistant", "content": response}
-    ]
-
+    return history + [{"role":"assistant","content": response}]
 
 # --- UI layout ---
 with gr.Blocks(title="Spatchat") as iface:
