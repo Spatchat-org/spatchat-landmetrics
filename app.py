@@ -75,24 +75,51 @@ col_map = {
 }
 
 # --- Raster preview & clear ---
+
 def preview_raster(file):
     try:
         with rasterio.open(file.name) as src:
-            data = src.read(1)
+            raw = src.read(1)
             nodata = src.nodata
-        vals = np.unique(data[data != nodata])
-        colors = plt.cm.tab10(np.linspace(0,1,len(vals)))
-        fig, ax = plt.subplots(figsize=(5,5))
-        ax.imshow(data, cmap='tab10', interpolation='nearest')
+        # Detect string vs numeric
+        if raw.dtype.kind in ('U','S','O'):
+            data_str = raw.astype(str)
+            vals = np.unique(data_str[data_str != ""])
+            name2code = {name: i for i, name in enumerate(vals)}
+            data = np.vectorize(lambda s: name2code.get(str(s), -1))(raw)
+            labels = vals.tolist()
+        else:
+            data = raw
+            vals = np.unique(data[data != nodata])
+            labels = [f"Class {int(v)}" for v in vals]
+
+        colors = plt.cm.tab10(np.linspace(0, 1, len(vals)))
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ax.imshow(
+            data,
+            cmap='tab10',
+            interpolation='nearest',
+            vmin=0,
+            vmax=len(vals)-1
+        )
         ax.set_title("Uploaded Raster")
         ax.axis('off')
-        handles = [mpatches.Patch(color=colors[i], label=f"Class {int(v)}")
-                   for i,v in enumerate(vals)]
+
+        handles = [
+            mpatches.Patch(color=colors[i], label=labels[i])
+            for i in range(len(vals))
+        ]
         ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
         return fig
-    except:
-        fig, ax = plt.subplots(figsize=(5,5))
-        ax.text(0.5,0.5,"🗂️ No raster loaded.", ha='center', va='center', color='gray')
+
+    except Exception:
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ax.text(
+            0.5, 0.5,
+            "🗂️ No raster loaded.",
+            ha='center', va='center',
+            color='gray'
+        )
         ax.set_title("Raster Preview", color='dimgray')
         ax.axis('off')
         return fig
@@ -138,31 +165,68 @@ def list_metrics(history):
     return history + [{"role":"assistant","content":"\n".join(lines).strip()}], ""
 
 def compute_metric(file, key, history):
-    ls      = Landscape(file.name, nodata=0)
+    # read raw array and resolution
+    with rasterio.open(file.name) as src:
+        raw    = src.read(1)
+        x_res, y_res = src.res
+        nodata = src.nodata or 0
+
+    # remap strings → ints if needed
+    if raw.dtype.kind in ('U','S','O'):
+        data_str = raw.astype(str)
+        uniq     = np.unique(data_str[data_str != ""])
+        name2code = {name: i+1 for i, name in enumerate(uniq)}
+        arr = np.zeros_like(raw, dtype=int)
+        for name, code in name2code.items():
+            arr[data_str == name] = code
+        ls = Landscape(arr, res=(x_res, y_res), nodata=0)
+    else:
+        ls = Landscape(file.name, nodata=0, res=(x_res, y_res))
+
     df_land = ls.compute_landscape_metrics_df()
     df_cls  = ls.compute_class_metrics_df()
     name,_  = metric_definitions[key]
     col     = col_map.get(key, key)
 
-    # Landscape‐level
+    # landscape‐level
     if key == "np":
-        land_val = int(df_cls["number_of_patches"].sum())
+        land_val  = int(df_cls["number_of_patches"].sum())
         land_part = f"**Landscape-level {name}:** {land_val}\n\n"
     elif col in df_land.columns:
-        land_val = df_land[col].iloc[0]
+        land_val  = df_land[col].iloc[0]
         land_part = f"**Landscape-level {name}:** {land_val:.4f}\n\n"
     else:
         land_part = ""
 
-    # Class‐level
+    # class‐level
     df2 = df_cls.rename_axis("code").reset_index()
-    df2["class_name"] = df2["code"].map(lambda c: f"Class {int(c)}")
+    if raw.dtype.kind in ('U','S','O'):
+        code2name = {v: k for k, v in name2code.items()}
+        df2["class_name"] = df2["code"].map(lambda c: code2name.get(c, f"Class {c}"))
+    else:
+        df2["class_name"] = df2["code"].map(lambda c: f"Class {int(c)}")
+
     if col in df2.columns:
         tbl = df2[["class_name", col]].to_markdown(index=False)
     else:
         tbl = "(not available at class level)"
+
     content = land_part + f"**Class-level {name}:**\n{tbl}"
     return history + [{"role":"assistant","content":content}], ""
+
+
+def count_classes(file, history):
+    with rasterio.open(file.name) as src:
+        raw = src.read(1)
+        nodata = src.nodata or 0
+    if raw.dtype.kind in ('U','S','O'):
+        vals = np.unique(raw.astype(str)[raw.astype(str)!=""])
+    else:
+        vals = np.unique(raw[raw!=nodata])
+    return history + [{
+        "role":"assistant",
+        "content":f"Your raster contains {len(vals)} unique classes."
+    }], ""
 
 def llm_fallback(history):
     prompt = [
@@ -181,14 +245,18 @@ def llm_fallback(history):
 
 # --- Main handler ---
 def analyze_raster(file, question, history):
-    hist = history + [{"role":"user","content":question}]
+    hist  = history + [{"role":"user","content":question}]
     lower = question.lower()
 
     # require raster
     if file is None:
-        return hist + [{"role":"assistant",
-            "content":"Please upload a GeoTIFF before asking anything."
+        return hist + [{"role":"assistant","content":
+            "Please upload a GeoTIFF before asking anything."
         }], ""
+
+    # how many classes?
+    if "how many classes" in lower or re.search(r"\bnum(ber)? of classes\b", lower):
+        return count_classes(file, hist)
 
     # metadata?
     if re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower):
@@ -198,8 +266,8 @@ def analyze_raster(file, question, history):
     if re.search(r"\b(what|which|list|available).*metrics\b", lower):
         return list_metrics(hist)
 
-    # compute a metric?
-    for code, (full, _) in metric_definitions.items():
+    # compute metric?
+    for code,(full,_) in metric_definitions.items():
         for syn in synonyms.get(code, [code, full.lower()]):
             if re.search(rf"\b{re.escape(syn)}\b", lower):
                 return compute_metric(file, code, hist)
