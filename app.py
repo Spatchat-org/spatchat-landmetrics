@@ -74,6 +74,27 @@ col_map = {
     "cai":          "core_area_index",
 }
 
+# --- Helper mappings for metrics ---
+helper_methods = {
+    "pd":           "patch_density",
+    "edge_density": "edge_density",
+    "lsi":          "landscape_shape_index",
+    "contag":       "contagion_index",
+    "shdi":         "shannon_diversity_index",
+    "shei":         "shannon_evenness_index",
+    "mesh":         "effective_mesh_size",
+    "tca":          "total_core_area",
+    "lpi":          "largest_patch_index",
+    "te":           "total_edge",
+}
+
+# Metrics strictly available only at class level:
+class_only = {
+    "pland",
+    "area", "perim", "para", "shape", "frac",
+    "enn", "core", "nca", "cai",
+}
+
 # --- Raster preview & clear ---
 
 def no_raster_fig():
@@ -161,99 +182,133 @@ def list_metrics(history):
     return history + [{"role":"assistant","content":"\n".join(lines).strip()}], ""
 
 def compute_metric(file, key, history):
-    import rasterio, numpy as np
-    from pylandstats import Landscape
 
-    # 1️⃣ Read the band + geo‑metadata
+    # 1️⃣ Read raster + metadata
     with rasterio.open(file.name) as src:
-        raw    = src.read(1)
+        raw = src.read(1)
         x_res, y_res = src.res
         nodata = src.nodata or 0
 
-    # 2️⃣ On‑the‑fly map of string classes → ints
-    if raw.dtype.kind in ("U","S","O"):
+    # 2️⃣ String-to-int mapping if needed
+    if raw.dtype.kind in ("U", "S", "O"):
         data_str = raw.astype(str)
-        uniq     = np.unique(data_str[data_str!=""])
-        name2code= {nm:i+1 for i,nm in enumerate(uniq)}
-        arr      = np.zeros_like(raw, dtype=int)
+        uniq = np.unique(data_str[data_str!=""])
+        name2code = {nm: i+1 for i, nm in enumerate(uniq)}
+        arr = np.zeros_like(raw, dtype=int)
         for nm, code in name2code.items():
             arr[data_str==nm] = code
-        ls = Landscape(arr, res=(x_res,y_res), nodata=0)
-        code2name = {v:k for k,v in name2code.items()}
+        ls = Landscape(arr, res=(x_res, y_res), nodata=0)
     else:
-        ls = Landscape(file.name, nodata=nodata, res=(x_res,y_res))
-        code2name = None
+        ls = Landscape(file.name, nodata=nodata, res=(x_res, y_res))
 
     # 3️⃣ Friendly metric name & DataFrame column
     metric_name, _ = metric_definitions[key]
     col = col_map.get(key, key)
 
-    # 4️⃣ Which metrics we can call as fast landscape helpers?
-    helper_methods = {
-        "pd":           "patch_density",
-        "edge_density": "edge_density",
-        "lsi":          "landscape_shape_index",
-        "contag":       "contagion_index",
-        "shdi":         "shannon_diversity_index",
-        "shei":         "shannon_evenness_index",
-        "mesh":         "effective_mesh_size",
-        "tca":          "total_core_area",
-        "lpi":          "largest_patch_index",
-        "te":           "total_edge",
-    }
-
-    # 5️⃣ Which metrics are strictly class‑level only?
-    class_only = {
-        "pland",
-        "area", "perim", "para", "shape", "frac",
-        "enn", "core", "nca", "cai",
-    }
-
-    # 6️⃣ Build the landscape‐level part
+    # 4️⃣ Landscape-level
     if key == "np":
-        # sum of all class patch counts
         df_tmp = ls.compute_class_metrics_df(metrics=["number_of_patches"])
-        val    = int(df_tmp["number_of_patches"].sum())
-        land_part = f"**Landscape-level {metric_name}:** {val}\n\n"
-
+        val = int(df_tmp["number_of_patches"].sum())
+        land_part = f"**Landscape-level {metric_name}:** {val}"
     elif key in helper_methods:
-        # call the fast helper, e.g. ls.edge_density()
-        fn  = helper_methods[key]
-        val = getattr(ls, fn)()
-        land_part = f"**Landscape-level {metric_name}:** {val:.4f}\n\n"
-
+        val = getattr(ls, helper_methods[key])()
+        land_part = f"**Landscape-level {metric_name}:** {val:.4f}"
     elif key in class_only:
-        # no landscape‐level value for these
         land_part = ""
-
     else:
-        # any other (true) landscape‐level metric
         df_land = ls.compute_landscape_metrics_df(metrics=[col])
-        val     = df_land[col].iloc[0]
-        land_part = f"**Landscape-level {metric_name}:** {val:.4f}\n\n"
+        val = df_land[col].iloc[0]
+        land_part = f"**Landscape-level {metric_name}:** {val:.4f}"
 
-    # 7️⃣ Compute class‐level table (always just that one col)
-    df2 = ls.compute_class_metrics_df(metrics=[col])\
-            .rename_axis("code")\
-            .reset_index()
+    # 5️⃣ Class-level table
+    df2 = ls.compute_class_metrics_df(metrics=[col]).rename_axis("code").reset_index()
+    df2["class_name"] = df2["code"].map(lambda c: f"Class {int(c)}")
+    tbl = df2[["class_name", col]].to_markdown(index=False)
+    content = land_part + f"\n**Class-level {metric_name}:**\n{tbl}"
+    return history + [{"role":"assistant","content":content}]
 
-    # 8️⃣ Friendly class names
+def compute_multiple_metrics(file, keys, history):
+    # 1️⃣ Read raster + metadata
+    with rasterio.open(file.name) as src:
+        raw = src.read(1)
+        x_res, y_res = src.res
+        nodata = src.nodata or 0
+
+    # 2️⃣ String-to-int mapping if needed
+    if raw.dtype.kind in ("U","S","O"):
+        data_str = raw.astype(str)
+        uniq = np.unique(data_str[data_str!=""])
+        name2code = {nm: i+1 for i, nm in enumerate(uniq)}
+        arr = np.zeros_like(raw, dtype=int)
+        for nm, code in name2code.items():
+            arr[data_str==nm] = code
+        ls = Landscape(arr, res=(x_res, y_res), nodata=0)
+        code2name = {v: k for k, v in name2code.items()}
+    else:
+        ls = Landscape(file.name, nodata=nodata, res=(x_res, y_res))
+        code2name = None
+
+    # 3️⃣ Landscape-level summaries
+    land_parts = []
+    for key in keys:
+        metric_name, _ = metric_definitions[key]
+        col = col_map[key]
+        if key == "np":
+            df_tmp = ls.compute_class_metrics_df(metrics=["number_of_patches"])
+            val = int(df_tmp["number_of_patches"].sum())
+            land_parts.append(f"**Landscape-level {metric_name}:** {val}")
+        elif key in helper_methods:
+            val = getattr(ls, helper_methods[key])()
+            land_parts.append(f"**Landscape-level {metric_name}:** {val:.4f}")
+        elif key not in class_only:
+            df_land = ls.compute_landscape_metrics_df(metrics=[col])
+            val = df_land[col].iloc[0]
+            land_parts.append(f"**Landscape-level {metric_name}:** {val:.4f}")
+    land_text = "\n\n".join(land_parts) + "\n\n" if land_parts else ""
+
+    # 4️⃣ Class-level table
+    cols = [col_map[k] for k in keys]
+    df2 = ls.compute_class_metrics_df(metrics=cols).rename_axis("code").reset_index()
     if code2name:
-        df2["class_name"] = df2["code"]\
-            .map(lambda c: f"{c}: {code2name.get(c,'Unknown')}")
+        df2["class_name"] = df2["code"].map(lambda c: f"{c}: {code2name.get(c,'Unknown')}")
     else:
-        df2["class_name"] = df2["code"]\
-            .map(lambda c: f"Class {int(c)}")
+        df2["class_name"] = df2["code"].map(lambda c: f"Class {int(c)}")
+    df2 = df2[["class_name"] + cols]
+    tbl = df2.to_markdown(index=False)
 
-    # 9️⃣ Format
-    if col in df2.columns:
-        tbl = df2[["class_name", col]].to_markdown(index=False)
-    else:
-        tbl = "(not available at class level)"
+    content = land_text + "**Class-level metrics:**\n" + tbl
+    return history + [{"role":"assistant","content":content}]
 
-    # 🔟 Return
-    content = land_part + f"**Class-level {metric_name}:**\n{tbl}"
-    return history + [{"role":"assistant","content":content}], ""
+
+def analyze_raster(file, question, history):
+    hist = history + [{"role":"user","content":question}]
+    lower = question.lower()
+
+    if file is None:
+        return hist + [{"role":"assistant","content":
+            "Please upload a GeoTIFF before asking anything."
+        }], ""
+
+    if "how many classes" in lower or re.search(r"\bnum(ber)? of classes\b", lower):
+        return count_classes(file, hist)
+    if re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower):
+        return answer_metadata(file, hist)
+    if re.search(r"\b(what|which|list|available).*metrics\b", lower):
+        return list_metrics(hist)
+
+    # gather all metric keys mentioned
+    found = []
+    for code, (full, _) in metric_definitions.items():
+        for syn in synonyms.get(code, [code, full.lower()]):
+            if re.search(rf"\b{re.escape(syn)}\b", lower) and code not in found:
+                found.append(code)
+
+    if len(found) > 1:
+        return compute_multiple_metrics(file, found, hist), ""
+    elif len(found) == 1:
+        return compute_metric(file, found[0], hist)
+
+    return llm_fallback(hist)
 
 def count_classes(file, history):
     with rasterio.open(file.name) as src:
@@ -282,30 +337,6 @@ def llm_fallback(history):
         temperature=0.4
     ).choices[0].message.content
     return history + [{"role":"assistant","content":resp}], ""
-
-# --- Main handler ---
-def analyze_raster(file, question, history):
-    hist  = history + [{"role":"user","content":question}]
-    lower = question.lower()
-
-    if file is None:
-        return hist + [{"role":"assistant","content":
-            "Please upload a GeoTIFF before asking anything."
-        }], ""
-
-    if "how many classes" in lower or re.search(r"\bnum(ber)? of classes\b", lower):
-        return count_classes(file, hist)
-    if re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower):
-        return answer_metadata(file, hist)
-    if re.search(r"\b(what|which|list|available).*metrics\b", lower):
-        return list_metrics(hist)
-
-    for code,(full,_) in metric_definitions.items():
-        for syn in synonyms.get(code, [code, full.lower()]):
-            if re.search(rf"\b{re.escape(syn)}\b", lower):
-                return compute_metric(file, code, hist)
-
-    return llm_fallback(hist)
 
 # --- UI layout ---
 initial_history = [
