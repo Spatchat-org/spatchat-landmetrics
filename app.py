@@ -12,14 +12,26 @@ import os
 from together import Together
 
 # --- Load glossary and synonyms ---
-with open('spatchat_glossary.yaml') as f:
-    glossary = yaml.safe_load(f)
+try:
+    with open('spatchat_glossary.yaml') as f:
+        glossary = yaml.safe_load(f)
+    if not isinstance(glossary, dict):
+        raise ValueError("Glossary file did not contain a mapping")
+except Exception as e:
+    # Fallback to minimal metric definitions if YAML fails
+    print(f"⚠️ Warning loading glossary: {e}")
+    glossary = {
+        "pland": {"name":"Proportion of Landscape (PLAND)","definition":"% of landscape by class","units":"%","interpretation":"..."},
+        "np": {"name":"Number of Patches (NP)","definition":"Count of patches","units":"unitless","interpretation":"..."},
+        # add other minimal defaults as needed
+    }
 metric_definitions = {code: info for code, info in glossary.items()}
+# Build synonyms map: code -> list of match phrases
 synonyms = {}
 for code, info in glossary.items():
-    name = info['name'].lower()
+    nm = info.get('name', code).lower()
     phrase = code.replace('_', ' ')
-    synonyms[code] = [code.lower(), phrase, name]
+    synonyms[code] = [code.lower(), phrase, nm]
 
 # --- LLM setup ---
 load_dotenv()
