@@ -13,38 +13,65 @@ from dotenv import load_dotenv
 load_dotenv()
 client = Together(api_key=os.getenv("TOGETHER_API_KEY"))
 
-# --- Hard‑coded metric glossary ---
+# --- Metric glossary (hard‑coded) ---
 metric_definitions = {
-    "pland":  ("Proportion of Landscape (PLAND)",      "Percentage of landscape comprised by the class."),
-    "np":     ("Number of Patches (NP)",               "Total number of patches for the class or landscape."),
-    "pd":     ("Patch Density (PD)",                   "Number of patches per 100 hectares."),
-    "lpi":    ("Largest Patch Index (LPI)",            "Percentage of total landscape made up by the largest patch."),
-    "te":     ("Total Edge (TE)",                      "Total length of all patch edges."),
-    "edge_density": ("Edge Density (ED)",             "Edge length per hectare."),
-    "lsi":    ("Landscape Shape Index (LSI)",          "Overall shape complexity of the landscape."),
-    "tca":    ("Total Core Area (TCA)",                "Sum of all core areas in the landscape."),
-    "mesh":   ("Effective Mesh Size (MESH)",           "Average size of patches after accounting for fragmentation."),
-    "contag": ("Contagion Index (CONTAG)",             "Clumpiness of patches — higher means more aggregated."),
-    "shdi":   ("Shannon Diversity Index (SHDI)",       "Diversity of patch types."),
-    "shei":   ("Shannon Evenness Index (SHEI)",        "Evenness of patch distribution."),
-    "area":   ("Patch Area (AREA)",                    "Area of each individual patch."),
-    "perim":  ("Patch Perimeter (PERIM)",              "Perimeter of each patch."),
-    "para":   ("Perimeter-Area Ratio (PARA)",          "Ratio of perimeter to area for each patch."),
-    "shape":  ("Shape Index (SHAPE)",                  "Shape complexity of each patch."),
-    "frac":   ("Fractal Dimension (FRAC)",             "Fractal complexity of each patch shape."),
-    "enn":    ("Euclidean Nearest Neighbor (ENN)",     "Distance to nearest patch of same class."),
-    "core":   ("Core Area (CORE)",                     "Interior area of a patch excluding edges."),
-    "nca":    ("Number of Core Areas (NCA)",           "Total core regions in the landscape."),
-    "cai":    ("Core Area Index (CAI)",                "Proportion of core area to total patch area."),
+    "pland":          ("Proportion of Landscape (PLAND)",      "Percentage of landscape comprised by the class."),
+    "np":             ("Number of Patches (NP)",               "Total number of patches for the class or entire landscape."),
+    "pd":             ("Patch Density (PD)",                   "Number of patches per 100 hectares."),
+    "lpi":            ("Largest Patch Index (LPI)",            "Percentage of total landscape made up by the largest patch."),
+    "te":             ("Total Edge (TE)",                      "Total length of all patch edges."),
+    "edge_density":   ("Edge Density (ED)",                    "Edge length per hectare."),
+    "lsi":            ("Landscape Shape Index (LSI)",          "Overall shape complexity of the landscape."),
+    "tca":            ("Total Core Area (TCA)",                "Sum of all core areas in the landscape."),
+    "mesh":           ("Effective Mesh Size (MESH)",           "Average patch size accounting for edges."),
+    "contag":         ("Contagion Index (CONTAG)",             "Clumpiness of patches."),
+    "shdi":           ("Shannon Diversity Index (SHDI)",       "Diversity of patch types."),
+    "shei":           ("Shannon Evenness Index (SHEI)",        "Evenness of patch distribution."),
+    "area":           ("Total Area (AREA)",                    "Total area of patches by class or landscape."),
+    "perim":          ("Total Perimeter (PERIM)",               "Total perimeter of all patches."),
+    "para":           ("Perimeter-Area Ratio (PARA)",          "Ratio of perimeter to area."),
+    "shape":          ("Shape Index (SHAPE)",                  "Normalized perimeter-area ratio."),
+    "frac":           ("Fractal Dimension (FRAC)",             "Fractal complexity of patch shapes."),
+    "enn":            ("Euclidean Nearest Neighbor (ENN)",     "Distance to nearest patch of same class."),
+    "core":           ("Total Core Area (CORE)",               "Sum of interior (nondisturbed) patch area."),
+    "nca":            ("Number of Core Areas (NCA)",           "Count of core regions in the landscape."),
+    "cai":            ("Core Area Index (CAI)",                "Proportion of core area to total patch area."),
 }
 
-# --- Synonyms for natural language matching ---
+# --- Synonyms for natural names ---
 synonyms = {
     "edge_density": ["ed", "edge density", "edge_density"],
-    "pland":          ["pland", "proportion of landscape", "percent landscape"],
+    "pland":          ["pland", "proportion of landscape"],
     "np":             ["np", "number of patches"],
     "pd":             ["pd", "patch density"],
-    # … add more if needed …
+    "lpi":            ["lpi", "largest patch"],
+    "te":             ["te", "total edge", "total_edge"],
+    # add more as desired...
+}
+
+# --- Map our codes to actual DataFrame column names ---
+col_map = {
+    "pland":         "proportion_of_landscape",
+    "np":            "number_of_patches",
+    "pd":            "patch_density",
+    "lpi":           "largest_patch_index",
+    "te":            "total_edge",
+    "edge_density":  "edge_density",
+    "lsi":           "landscape_shape_index",
+    "tca":           "total_core_area",
+    "mesh":          "effective_mesh_size",
+    "contag":        "contagion_index",
+    "shdi":          "shannon_diversity_index",
+    "shei":          "shannon_evenness_index",
+    "area":          "total_area",
+    "perim":         "total_perimeter",
+    "para":          "perimeter_area_ratio",
+    "shape":         "shape_index",
+    "frac":          "fractal_dimension_index",
+    "enn":           "euclidean_nearest_neighbor_distance",
+    "core":          "total_core_area",
+    "nca":           "number_of_core_areas",
+    "cai":           "core_area_index",
 }
 
 # --- Raster preview & clear ---
@@ -53,16 +80,14 @@ def preview_raster(file):
         with rasterio.open(file.name) as src:
             data = src.read(1)
             nodata = src.nodata
-        unique = np.unique(data[data != nodata])
-        colors = plt.cm.tab10(np.linspace(0,1,len(unique)))
+        vals = np.unique(data[data != nodata])
+        colors = plt.cm.tab10(np.linspace(0,1,len(vals)))
         fig, ax = plt.subplots(figsize=(5,5))
         ax.imshow(data, cmap='tab10', interpolation='nearest')
         ax.set_title("Uploaded Raster")
         ax.axis('off')
-        handles = [
-            mpatches.Patch(color=colors[i], label=f"Class {int(val)}")
-            for i,val in enumerate(unique)
-        ]
+        handles = [mpatches.Patch(color=colors[i], label=f"Class {int(v)}")
+                   for i,v in enumerate(vals)]
         ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
         return fig
     except:
@@ -82,26 +107,26 @@ def clear_raster():
 # --- Handlers ---
 def answer_metadata(file, history):
     with rasterio.open(file.name) as src:
-        crs      = src.crs
+        crs     = src.crs
         x_res,y_res = src.res
-        extent   = src.bounds
-        bands    = src.count
-        nodata   = src.nodata
-        unit     = getattr(src.crs,"linear_units","unit")
-    txt = "\n".join([
+        extent  = src.bounds
+        bands   = src.count
+        nodata  = src.nodata
+        unit    = getattr(src.crs,"linear_units","unit")
+    text = "\n".join([
         f"CRS: {crs}",
         f"Resolution: {x_res:.2f} × {y_res:.2f} {unit}",
         f"Extent: {extent}",
         f"Bands: {bands}",
         f"NoData value: {nodata}"
     ])
-    return history + [{"role":"assistant","content":txt}], ""
+    return history + [{"role":"assistant","content":text}], ""
 
 def list_metrics(history):
     groups = {
-        "Landscape":   ["contag","shdi","shei","mesh","lsi","tca"],
-        "Class":       ["pland","np","pd","lpi","te","edge_density"],
-        "Patch":       ["area","perim","para","shape","frac","enn","core","nca","cai"]
+        "Landscape": ["contag","shdi","shei","mesh","lsi","tca"],
+        "Class":     ["pland","np","pd","lpi","te","edge_density"],
+        "Patch":     ["area","perim","para","shape","frac","enn","core","nca","cai"]
     }
     lines = []
     for lvl, keys in groups.items():
@@ -113,27 +138,37 @@ def list_metrics(history):
     return history + [{"role":"assistant","content":"\n".join(lines).strip()}], ""
 
 def compute_metric(file, key, history):
-    ls       = Landscape(file.name, nodata=0)
-    df_land  = ls.compute_landscape_metrics_df()
-    df_class = ls.compute_class_metrics_df()
-    name,_   = metric_definitions[key]
+    ls      = Landscape(file.name, nodata=0)
+    df_land = ls.compute_landscape_metrics_df()
+    df_cls  = ls.compute_class_metrics_df()
+    name,_  = metric_definitions[key]
+    col     = col_map.get(key, key)
 
-    land_part = ""
-    if key in df_land.columns:
-        val = df_land[key].iloc[0]
-        land_part = f"**Landscape-level {name}:** {val:.4f}\n\n"
+    # Landscape‐level
+    if key == "np":
+        land_val = int(df_cls["number_of_patches"].sum())
+        land_part = f"**Landscape-level {name}:** {land_val}\n\n"
+    elif col in df_land.columns:
+        land_val = df_land[col].iloc[0]
+        land_part = f"**Landscape-level {name}:** {land_val:.4f}\n\n"
+    else:
+        land_part = ""
 
-    df2 = df_class.rename_axis("code").reset_index()
+    # Class‐level
+    df2 = df_cls.rename_axis("code").reset_index()
     df2["class_name"] = df2["code"].map(lambda c: f"Class {int(c)}")
-    tbl = df2[["class_name", key]].to_markdown(index=False)
-
+    if col in df2.columns:
+        tbl = df2[["class_name", col]].to_markdown(index=False)
+    else:
+        tbl = "(not available at class level)"
     content = land_part + f"**Class-level {name}:**\n{tbl}"
     return history + [{"role":"assistant","content":content}], ""
 
 def llm_fallback(history):
     prompt = [
         {"role":"system","content":(
-            "You are Spatchat. Use rasterio for metadata and pylandstats for metrics; otherwise reply conversationally."
+            "You are Spatchat, a helpful assistant. "
+            "Use rasterio for metadata and pylandstats for metrics; otherwise be conversational."
         )},
         *history
     ]
@@ -144,31 +179,32 @@ def llm_fallback(history):
     ).choices[0].message.content
     return history + [{"role":"assistant","content":resp}], ""
 
-# --- Main analyzer with regex intent detection ---
+# --- Main handler ---
 def analyze_raster(file, question, history):
     hist = history + [{"role":"user","content":question}]
     lower = question.lower()
 
-    # 1) require file before anything else
+    # require raster
     if file is None:
         return hist + [{"role":"assistant",
-            "content":"Please upload a GeoTIFF before asking anything."}], ""
+            "content":"Please upload a GeoTIFF before asking anything."
+        }], ""
 
-    # 2) metadata?
+    # metadata?
     if re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower):
         return answer_metadata(file, hist)
 
-    # 3) list metrics?
+    # list metrics?
     if re.search(r"\b(what|which|list|available).*metrics\b", lower):
         return list_metrics(hist)
 
-    # 4) compute metric?
+    # compute a metric?
     for code, (full, _) in metric_definitions.items():
         for syn in synonyms.get(code, [code, full.lower()]):
             if re.search(rf"\b{re.escape(syn)}\b", lower):
                 return compute_metric(file, code, hist)
 
-    # 5) fallback
+    # fallback
     return llm_fallback(hist)
 
 # --- UI layout ---
@@ -187,7 +223,7 @@ with gr.Blocks(title="Spatchat") as iface:
     gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant")
     gr.HTML('''
       <div style="margin:-10px 0 20px;">
-        <input id="shareLink" type="text" readonly
+        <input id="shareLink" readonly
                value="https://spatchat.org/browse/?room=landmetrics"
                style="width:50%;padding:5px;border:1px solid #ccc;border-radius:4px;" />
         <button onclick="navigator.clipboard.writeText(
@@ -206,8 +242,7 @@ with gr.Blocks(title="Spatchat") as iface:
         with gr.Column(scale=1):
             chatbot        = gr.Chatbot(value=initial_history, type="messages",
                                        label="Spatchat Dialog")
-            question_input = gr.Textbox(placeholder="e.g. calculate edge density",
-                                       lines=1)
+            question_input = gr.Textbox(placeholder="e.g. calculate edge density", lines=1)
             clear_button   = gr.Button("Clear Chat")
 
     # callbacks
