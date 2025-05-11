@@ -77,65 +77,8 @@ col_map = {
 # --- Raster preview & clear ---
 
 def preview_raster(file):
-    try:
-        # 1) Read the first band
-        with rasterio.open(file.name) as src:
-            raw    = src.read(1)
-            nodata = src.nodata or 0
-            # Try to read a GDAL category table if it exists
-            cats   = src.categories(1) or {}
-
-        # 2) If there’s a category table, use its names
-        if cats:
-            # raw is already integer codes 1..N
-            data       = raw.astype(int)
-            vals       = sorted(cats.keys())
-            labels     = [f"{v}: {cats[v]}" for v in vals]
-            n          = len(vals)
-            colors     = plt.cm.tab10(np.linspace(0, 1, n))
-
-        # 3) Else if the array is string‐typed, map each unique string → code
-        elif raw.dtype.kind in ('U', 'S', 'O'):
-            data_str     = raw.astype(str)
-            unique_names = np.unique(data_str[data_str != ""])
-            name2code    = {name: i+1 for i, name in enumerate(unique_names)}
-            data         = np.zeros_like(raw, dtype=int)
-            for name, code in name2code.items():
-                data[data_str == name] = code
-            labels = [f"{i+1}: {unique_names[i]}" for i in range(len(unique_names))]
-            n      = len(unique_names)
-            colors = plt.cm.tab10(np.linspace(0, 1, n))
-
-        # 4) Otherwise it’s a plain numeric raster
-        else:
-            data   = raw
-            vals   = np.unique(data[data != nodata])
-            labels = [f"{int(v)}: Class {int(v)}" for v in vals]
-            n      = len(vals)
-            colors = plt.cm.tab10(np.linspace(0, 1, n))
-
-        # 5) Build the figure
-        fig, ax = plt.subplots(figsize=(5, 5))
-        ax.imshow(
-            data,
-            cmap='tab10',
-            interpolation='nearest',
-            vmin=1,
-            vmax=n
-        )
-        ax.set_title("Uploaded Raster")
-        ax.axis('off')
-
-        # 6) Legend using our labels
-        handles = [
-            mpatches.Patch(color=colors[i], label=labels[i])
-            for i in range(n)
-        ]
-        ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
-        return fig
-
-    except Exception:
-        # Fallback: no valid raster loaded
+    # helper to draw the empty‐raster placeholder
+    def no_raster_fig():
         fig, ax = plt.subplots(figsize=(5, 5))
         ax.text(
             0.5, 0.5,
@@ -147,6 +90,71 @@ def preview_raster(file):
         ax.set_title("Raster Preview", color='dimgray')
         ax.axis('off')
         return fig
+
+    if file is None:
+        return no_raster_fig()
+
+    try:
+        # 1) Read the data and metadata
+        with rasterio.open(file.name) as src:
+            raw    = src.read(1)
+            nodata = src.nodata or 0
+            # Try to get GDAL categories (value→name)
+            try:
+                cats = src.categories(1) or {}
+            except Exception:
+                cats = {}
+
+        # 2) Decide which path to take
+        if cats:
+            # already integer codes with category names
+            data   = raw.astype(int)
+            vals   = sorted(cats.keys())
+            labels = [f"{v}: {cats[v]}" for v in vals]
+            n      = len(vals)
+            colors = plt.cm.tab10(np.linspace(0, 1, n))
+
+        elif raw.dtype.kind in ('U', 'S', 'O'):
+            # string‑typed raster → map names → codes
+            data_str     = raw.astype(str)
+            unique_names = np.unique(data_str[data_str != ""])
+            name2code    = {name: i+1 for i, name in enumerate(unique_names)}
+            data         = np.zeros_like(raw, dtype=int)
+            for name, code in name2code.items():
+                data[data_str == name] = code
+            n      = len(unique_names)
+            labels = [f"{i+1}: {unique_names[i]}" for i in range(n)]
+            colors = plt.cm.tab10(np.linspace(0, 1, n))
+
+        else:
+            # plain numeric raster
+            data   = raw
+            vals   = np.unique(data[data != nodata])
+            n      = len(vals)
+            labels = [f"{int(v)}: Class {int(v)}" for v in vals]
+            colors = plt.cm.tab10(np.linspace(0, 1, n))
+
+        # 3) Plot
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ax.imshow(
+            data,
+            cmap='tab10',
+            interpolation='nearest',
+            vmin=1,
+            vmax=n
+        )
+        ax.set_title("Uploaded Raster")
+        ax.axis('off')
+
+        # 4) Legend
+        handles = [mpatches.Patch(color=colors[i], label=labels[i]) for i in range(n)]
+        ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
+        return fig
+
+    except Exception as e:
+        print("preview_raster error:", e)
+        return no_raster_fig()
+
 
 def clear_raster():
     fig, ax = plt.subplots(figsize=(5,5))
