@@ -11,22 +11,56 @@ from dotenv import load_dotenv
 import os
 from together import Together
 
+# --- Raster preview ---
+def preview_raster(file):
+    try:
+        with rasterio.open(file.name) as src:
+            data = src.read(1)
+        unique = np.unique(data[data != 0])
+        colors = plt.cm.tab10(np.linspace(0, 1, len(unique)))
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ax.imshow(data, cmap='tab10', interpolation='nearest')
+        ax.set_title("Uploaded Raster")
+        ax.axis('off')
+        handles = [mpatches.Patch(color=colors[i], label=f'Class {int(val)}')
+                   for i, val in enumerate(unique)]
+        ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
+        return fig
+    except Exception:
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ax.text(0.5, 0.5, "🗂️ No raster loaded.", ha='center', va='center', color='gray')
+        ax.set_title("Raster Preview")
+        ax.axis('off')
+        return fig
+
+# --- Clear raster ---
+def clear_raster():
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.text(0.5, 0.5, "🗂️ No raster loaded.", ha='center', va='center', color='gray')
+    ax.set_title("Raster Preview")
+    ax.axis('off')
+    return None, gr.update(value=fig)
+
 # --- Load glossary and synonyms ---
-try:
-    with open('spatchat_glossary.yaml') as f:
-        glossary = yaml.safe_load(f)
-    if not isinstance(glossary, dict):
-        raise ValueError("Glossary file did not contain a mapping")
-except Exception as e:
-    # Fallback to minimal metric definitions if YAML fails
-    print(f"⚠️ Warning loading glossary: {e}")
+glossary = None
+for fname in ['spatchat_glossary.yaml', 'spatchat_glossary.yml', 'spatchat_glossary.txt']:
+    try:
+        with open(fname) as f:
+            glossary = yaml.safe_load(f)
+        if not isinstance(glossary, dict):
+            raise ValueError("Glossary file did not contain a mapping")
+        break
+    except FileNotFoundError:
+        continue
+    except Exception as e:
+        print(f"⚠️ Warning loading glossary from {fname}: {e}")
+        break
+if glossary is None:
     glossary = {
-        "pland": {"name":"Proportion of Landscape (PLAND)","definition":"% of landscape by class","units":"%","interpretation":"..."},
-        "np": {"name":"Number of Patches (NP)","definition":"Count of patches","units":"unitless","interpretation":"..."},
-        # add other minimal defaults as needed
+        "pland": {"name": "Proportion of Landscape (PLAND)", "definition": "% of landscape by class", "units": "%", "interpretation": "..."},
+        "np": {"name": "Number of Patches (NP)", "definition": "Count of patches", "units": "unitless", "interpretation": "..."},
     }
 metric_definitions = {code: info for code, info in glossary.items()}
-# Build synonyms map: code -> list of match phrases
 synonyms = {}
 for code, info in glossary.items():
     nm = info.get('name', code).lower()
