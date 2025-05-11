@@ -327,17 +327,20 @@ initial_history = [
      "👋 Hi! I’m Spatchat. Upload a GeoTIFF to begin—then ask for CRS, resolution, extent, or any landscape metric."}
 ]
 
+# --- UI layout ---
 with gr.Blocks(title="Spatchat") as iface:
     # logo & share link
     gr.HTML('<head><link rel="icon" href="file=logo1.png"></head>')
-    gr.Image(value="logo/logo_long1.png", type="filepath",
-             show_label=False, show_download_button=False,
-             show_share_button=False, elem_id="logo-img")
+    gr.Image(
+        value="logo/logo_long1.png", type="filepath",
+        show_label=False, show_download_button=False,
+        show_share_button=False, elem_id="logo-img"
+    )
     gr.HTML("<style>#logo-img img{height:90px;margin:10px;border-radius:6px;}</style>")
     gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant")
     gr.HTML('''
       <div style="margin:-10px 0 20px;">
-        <input id="shareLink" readonly
+        <input id="shareLink" type="text" readonly
                value="https://spatchat.org/browse/?room=landmetrics"
                style="width:50%;padding:5px;border:1px solid #ccc;border-radius:4px;" />
         <button onclick="navigator.clipboard.writeText(
@@ -357,20 +360,24 @@ with gr.Blocks(title="Spatchat") as iface:
         with gr.Column(scale=1):
             chatbot        = gr.Chatbot(value=initial_history, type="messages",
                                        label="Spatchat Dialog")
-            question_input.submit(analyze_raster,
-                          inputs=[file_input, mapping_input, question_input, chatbot],
-                          outputs=[chatbot, question_input])
-            question_input = gr.Textbox(placeholder="e.g. calculate edge density", lines=1)
+            question_input = gr.Textbox(placeholder="e.g. calculate edge density",
+                                       lines=1)
             clear_button   = gr.Button("Clear Chat")
 
     # callbacks
-    file_input.change(preview_raster, inputs=[file_input, mapping_input], outputs=raster_output)
-    mapping_input.change(preview_raster, inputs=[file_input, mapping_input], outputs=raster_output)
-    clear_raster_button.click(clear_raster, inputs=None,
+    file_input.change(preview_raster,
+                      inputs=[file_input, mapping_input],
+                      outputs=raster_output)
+    mapping_input.change(preview_raster,
+                         inputs=[file_input, mapping_input],
+                         outputs=raster_output)
+    clear_raster_button.click(clear_raster,
+                              inputs=None,
                               outputs=[file_input, raster_output])
     question_input.submit(analyze_raster,
-                          inputs=[file_input, question_input, chatbot],
+                          inputs=[file_input, mapping_input, question_input, chatbot],
                           outputs=[chatbot, question_input])
     clear_button.click(lambda: initial_history, outputs=chatbot)
 
 iface.launch()
+
