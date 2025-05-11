@@ -306,7 +306,8 @@ def analyze_raster(file, question, history):
     if len(found) > 1:
         return compute_multiple_metrics(file, found, hist), ""
     elif len(found) == 1:
-        return compute_metric(file, found[0], hist)
+        # make sure to return (history_list, question_reset)
+        return compute_metric(file, found[0], hist), ""
 
     return llm_fallback(hist)
 
