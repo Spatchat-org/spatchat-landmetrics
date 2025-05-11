@@ -76,76 +76,82 @@ col_map = {
 
 # --- Raster preview & clear ---
 
-def preview_raster(file, mapping_file):
-    # fallback if no raster
-    if file is None:
-        return no_raster_fig()
-
-    # 1) Try to load your mapping CSV into a dict[int→str]
-    code2name = {}
-    if mapping_file is not None:
-        try:
-            df_map = pd.read_csv(mapping_file.name)
-            # expect columns: code,name
-            code2name = {int(r['code']): str(r['name']) for _, r in df_map.iterrows()}
-        except Exception as e:
-            print("mapping load error:", e)
-
-    # 2) Read the raster band
-    with rasterio.open(file.name) as src:
-        raw    = src.read(1)
-        nodata = src.nodata or 0
-        cats   = src.categories(1) or {}
-
-    # 3) If mapping_file provided, use that first
-    if code2name:
-        data   = raw.astype(int)
-        vals   = sorted(code2name.keys())
-        labels = [f"{v}: {code2name[v]}" for v in vals]
-        n      = len(vals)
-        colors = plt.cm.tab10(np.linspace(0,1,n))
-
-    # 4) Else if there’s a GDAL RAT
-    elif cats:
-        data   = raw.astype(int)
-        vals   = sorted(cats.keys())
-        labels = [f"{v}: {cats[v]}" for v in vals]
-        n      = len(vals)
-        colors = plt.cm.tab10(np.linspace(0,1,n))
-
-    # 5) Else if string‐typed
-    elif raw.dtype.kind in ('U','S','O'):
-        data_str     = raw.astype(str)
-        unique_names = np.unique(data_str[data_str!=""])
-        name2code    = {nm:i+1 for i,nm in enumerate(unique_names)}
-        data         = np.zeros_like(raw, dtype=int)
-        for nm, code in name2code.items():
-            data[data_str==nm] = code
-        labels = [f"{i+1}: {unique_names[i]}" for i in range(len(unique_names))]
-        n      = len(unique_names)
-        colors = plt.cm.tab10(np.linspace(0,1,n))
-
-    # 6) Otherwise numeric default
-    else:
-        data   = raw
-        vals   = np.unique(data[data!=nodata])
-        labels = [f"{int(v)}: Class {int(v)}" for v in vals]
-        n      = len(vals)
-        colors = plt.cm.tab10(np.linspace(0,1,n))
-
-    # 7) Plot exactly as before
-    fig, ax = plt.subplots(figsize=(5,5))
-    ax.imshow(data, cmap='tab10', interpolation='nearest', vmin=1, vmax=n)
-    ax.set_title("Uploaded Raster")
+def no_raster_fig():
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.text(0.5, 0.5, "🗂️ No raster loaded.", ha='center', va='center', color='gray', fontsize=14)
+    ax.set_title("Raster Preview", color='dimgray')
     ax.axis('off')
-    handles = [mpatches.Patch(color=colors[i], label=labels[i]) for i in range(n)]
-    ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
     return fig
+
+def preview_raster(file, mapping_file):
+    try:
+        # 0) If nothing uploaded yet
+        if file is None:
+            return no_raster_fig()
+
+        # 1) Load optional CSV mapping into code2name dict
+        code2name = {}
+        if mapping_file is not None:
+            df_map = pd.read_csv(mapping_file.name)
+            code2name = {int(r['code']): r['name'] for _, r in df_map.iterrows()}
+
+        # 2) Read the raster band + categories
+        with rasterio.open(file.name) as src:
+            raw    = src.read(1)
+            nodata = src.nodata or 0
+            try:
+                cats = src.categories(1) or {}
+            except:
+                cats = {}
+
+        # 3) Decide which labeling branch to use
+        if code2name:
+            data   = raw.astype(int)
+            vals   = sorted(code2name.keys())
+            labels = [f"{v}: {code2name[v]}" for v in vals]
+            n      = len(vals)
+            colors = plt.cm.tab10(np.linspace(0, 1, n))
+
+        elif cats:
+            data   = raw.astype(int)
+            vals   = sorted(cats.keys())
+            labels = [f"{v}: {cats[v]}" for v in vals]
+            n      = len(vals)
+            colors = plt.cm.tab10(np.linspace(0, 1, n))
+
+        elif raw.dtype.kind in ('U','S','O'):
+            data_str     = raw.astype(str)
+            unique_names = np.unique(data_str[data_str != ""])
+            name2code    = {nm: i+1 for i, nm in enumerate(unique_names)}
+            data         = np.zeros_like(raw, dtype=int)
+            for nm, code in name2code.items():
+                data[data_str == nm] = code
+            n      = len(unique_names)
+            labels = [f"{i+1}: {unique_names[i]}" for i in range(n)]
+            colors = plt.cm.tab10(np.linspace(0, 1, n))
+
+        else:
+            data   = raw
+            vals   = np.unique(data[data != nodata])
+            labels = [f"{int(v)}: Class {int(v)}" for v in vals]
+            n      = len(vals)
+            colors = plt.cm.tab10(np.linspace(0, 1, n))
+
+        # 4) Plot
+        fig, ax = plt.subplots(figsize=(5, 5))
+        ax.imshow(data, cmap='tab10', interpolation='nearest', vmin=1, vmax=n)
+        ax.set_title("Uploaded Raster")
+        ax.axis('off')
+
+        # 5) Legend
+        handles = [mpatches.Patch(color=colors[i], label=labels[i]) for i in range(n)]
+        ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
+
+        return fig
 
     except Exception as e:
         print("preview_raster error:", e)
         return no_raster_fig()
-
 
 def clear_raster():
     fig, ax = plt.subplots(figsize=(5,5))
