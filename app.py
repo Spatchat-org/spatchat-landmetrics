@@ -83,70 +83,53 @@ def no_raster_fig():
     ax.axis('off')
     return fig
 
-def preview_raster(file, mapping_file):
+def preview_raster(file):
     try:
-        # 0) If nothing uploaded yet
+        # 1) No‐file case
         if file is None:
             return no_raster_fig()
 
-        # 1) Load optional CSV mapping into code2name dict
-        code2name = {}
-        if mapping_file is not None:
-            df_map = pd.read_csv(mapping_file.name)
-            code2name = {int(r['code']): r['name'] for _, r in df_map.iterrows()}
-
-        # 2) Read the raster band + categories
+        # 2) Read band + metadata
         with rasterio.open(file.name) as src:
             raw    = src.read(1)
             nodata = src.nodata or 0
-            try:
-                cats = src.categories(1) or {}
-            except:
-                cats = {}
 
-        # 3) Decide which labeling branch to use
-        if code2name:
-            data   = raw.astype(int)
-            vals   = sorted(code2name.keys())
-            labels = [f"{v}: {code2name[v]}" for v in vals]
-            n      = len(vals)
-            colors = plt.cm.tab10(np.linspace(0, 1, n))
-
-        elif cats:
-            data   = raw.astype(int)
-            vals   = sorted(cats.keys())
-            labels = [f"{v}: {cats[v]}" for v in vals]
-            n      = len(vals)
-            colors = plt.cm.tab10(np.linspace(0, 1, n))
-
-        elif raw.dtype.kind in ('U','S','O'):
+        # 3) String‐typed → map names→codes
+        if raw.dtype.kind in ('U','S','O'):
             data_str     = raw.astype(str)
             unique_names = np.unique(data_str[data_str != ""])
             name2code    = {nm: i+1 for i, nm in enumerate(unique_names)}
             data         = np.zeros_like(raw, dtype=int)
             for nm, code in name2code.items():
                 data[data_str == nm] = code
+            labels = [f"{i+1}: {unique_names[i]}"
+                      for i in range(len(unique_names))]
             n      = len(unique_names)
-            labels = [f"{i+1}: {unique_names[i]}" for i in range(n)]
-            colors = plt.cm.tab10(np.linspace(0, 1, n))
 
+        # 4) Numeric → default “Class N” labels
         else:
-            data   = raw
-            vals   = np.unique(data[data != nodata])
-            labels = [f"{int(v)}: Class {int(v)}" for v in vals]
+            data = raw
+            vals = np.unique(data[data != nodata])
+            labels = [f"{int(v)}: Class {int(v)}"
+                      for v in vals]
             n      = len(vals)
-            colors = plt.cm.tab10(np.linspace(0, 1, n))
 
-        # 4) Plot
-        fig, ax = plt.subplots(figsize=(5, 5))
-        ax.imshow(data, cmap='tab10', interpolation='nearest', vmin=1, vmax=n)
+        # 5) Plot
+        colors = plt.cm.tab10(np.linspace(0,1,n))
+        fig, ax = plt.subplots(figsize=(5,5))
+        ax.imshow(data, cmap='tab10',
+                  interpolation='nearest',
+                  vmin=1, vmax=n)
         ax.set_title("Uploaded Raster")
         ax.axis('off')
-
-        # 5) Legend
-        handles = [mpatches.Patch(color=colors[i], label=labels[i]) for i in range(n)]
-        ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
-
+        handles = [
+            mpatches.Patch(color=colors[i], label=labels[i])
+            for i in range(n)
+        ]
+        ax.legend(handles=handles,
+                  loc='lower left',
+                  fontsize='small',
+                  frameon=True)
         return fig
 
     except Exception as e:
@@ -193,36 +176,25 @@ def list_metrics(history):
         lines.append("")
     return history + [{"role":"assistant","content":"\n".join(lines).strip()}], ""
 
-def compute_metric(file, key, history, mapping_file):
-    # 1) Load user’s code→name CSV if provided
-    code2name = {}
-    if mapping_file is not None:
-        try:
-            df_map = pd.read_csv(mapping_file.name)
-            # expect columns: code,name
-            code2name = {int(r['code']): str(r['name']) for _, r in df_map.iterrows()}
-        except Exception as e:
-            print("mapping load error:", e)
-
-    # 2) Read raster + resolution
+def compute_metric(file, key, history):
     with rasterio.open(file.name) as src:
         raw    = src.read(1)
         x_res, y_res = src.res
         nodata = src.nodata or 0
 
-    # 3) Remap string‐typed categories → ints if needed
+    # string‐typed remap
     if raw.dtype.kind in ('U','S','O'):
-        data_str    = raw.astype(str)
+        data_str     = raw.astype(str)
         unique_names = np.unique(data_str[data_str != ""])
-        name2code   = {nm: i+1 for i, nm in enumerate(unique_names)}
+        name2code    = {nm: i+1 for i, nm in enumerate(unique_names)}
         arr = np.zeros_like(raw, dtype=int)
         for nm, code in name2code.items():
             arr[data_str == nm] = code
-        # override any existing code2name
-        code2name = {v: k for k, v in name2code.items()}
         ls = Landscape(arr, res=(x_res, y_res), nodata=0)
+        code2name = {v:k for k,v in name2code.items()}
     else:
         ls = Landscape(file.name, nodata=nodata, res=(x_res, y_res))
+        code2name = None
 
     # 4) Compute metrics DataFrames
     df_land = ls.compute_landscape_metrics_df()
@@ -290,11 +262,10 @@ def llm_fallback(history):
     return history + [{"role":"assistant","content":resp}], ""
 
 # --- Main handler ---
-def analyze_raster(file, mapping_file, question, history):
+def analyze_raster(file, question, history):
     hist  = history + [{"role":"user","content":question}]
     lower = question.lower()
 
-    # require raster
     if file is None:
         return hist + [{"role":"assistant","content":
             "Please upload a GeoTIFF before asking anything."
@@ -327,7 +298,6 @@ initial_history = [
      "👋 Hi! I’m Spatchat. Upload a GeoTIFF to begin—then ask for CRS, resolution, extent, or any landscape metric."}
 ]
 
-# --- UI layout ---
 with gr.Blocks(title="Spatchat") as iface:
     # logo & share link
     gr.HTML('<head><link rel="icon" href="file=logo1.png"></head>')
@@ -354,7 +324,6 @@ with gr.Blocks(title="Spatchat") as iface:
     with gr.Row():
         with gr.Column(scale=1):
             file_input          = gr.File(label="Upload GeoTIFF", type="filepath")
-            mapping_input       = gr.File(label="Upload code→name CSV", file_types=['csv'])
             raster_output       = gr.Plot(label="Raster Preview")
             clear_raster_button = gr.Button("Clear Raster")
         with gr.Column(scale=1):
@@ -363,21 +332,16 @@ with gr.Blocks(title="Spatchat") as iface:
             question_input = gr.Textbox(placeholder="e.g. calculate edge density",
                                        lines=1)
             clear_button   = gr.Button("Clear Chat")
-
+    
     # callbacks
-    file_input.change(preview_raster,
-                      inputs=[file_input, mapping_input],
-                      outputs=raster_output)
-    mapping_input.change(preview_raster,
-                         inputs=[file_input, mapping_input],
-                         outputs=raster_output)
-    clear_raster_button.click(clear_raster,
-                              inputs=None,
+    file_input.change(preview_raster, inputs=file_input, outputs=raster_output)
+    clear_raster_button.click(clear_raster, inputs=None,
                               outputs=[file_input, raster_output])
     question_input.submit(analyze_raster,
-                          inputs=[file_input, mapping_input, question_input, chatbot],
+                          inputs=[file_input, question_input, chatbot],
                           outputs=[chatbot, question_input])
     clear_button.click(lambda: initial_history, outputs=chatbot)
+
 
 iface.launch()
 
