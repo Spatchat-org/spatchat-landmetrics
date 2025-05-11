@@ -78,32 +78,43 @@ col_map = {
 
 def preview_raster(file):
     try:
+        # 1) Read the first band
         with rasterio.open(file.name) as src:
             raw    = src.read(1)
-            nodata = src.nodata
+            nodata = src.nodata or 0
+            # Try to read a GDAL category table if it exists
+            cats   = src.categories(1) or {}
 
-        # --- map strings → integer codes for plotting ---
-        if raw.dtype.kind in ('U','S','O'):
-            data_str    = raw.astype(str)
+        # 2) If there’s a category table, use its names
+        if cats:
+            # raw is already integer codes 1..N
+            data       = raw.astype(int)
+            vals       = sorted(cats.keys())
+            labels     = [f"{v}: {cats[v]}" for v in vals]
+            n          = len(vals)
+            colors     = plt.cm.tab10(np.linspace(0, 1, n))
+
+        # 3) Else if the array is string‐typed, map each unique string → code
+        elif raw.dtype.kind in ('U', 'S', 'O'):
+            data_str     = raw.astype(str)
             unique_names = np.unique(data_str[data_str != ""])
-            # build a numeric array: 1..N
-            data = np.zeros_like(raw, dtype=int)
-            for idx, name in enumerate(unique_names):
-                data[data_str == name] = idx + 1
-
+            name2code    = {name: i+1 for i, name in enumerate(unique_names)}
+            data         = np.zeros_like(raw, dtype=int)
+            for name, code in name2code.items():
+                data[data_str == name] = code
             labels = [f"{i+1}: {unique_names[i]}" for i in range(len(unique_names))]
-            n = len(unique_names)
+            n      = len(unique_names)
             colors = plt.cm.tab10(np.linspace(0, 1, n))
 
-        # --- numerical raster legend (optional: display "value: Class value") ---
+        # 4) Otherwise it’s a plain numeric raster
         else:
-            data = raw
-            vals  = np.unique(data[data != nodata])
+            data   = raw
+            vals   = np.unique(data[data != nodata])
             labels = [f"{int(v)}: Class {int(v)}" for v in vals]
-            n = len(vals)
+            n      = len(vals)
             colors = plt.cm.tab10(np.linspace(0, 1, n))
 
-        # --- plot ---
+        # 5) Build the figure
         fig, ax = plt.subplots(figsize=(5, 5))
         ax.imshow(
             data,
@@ -115,7 +126,7 @@ def preview_raster(file):
         ax.set_title("Uploaded Raster")
         ax.axis('off')
 
-        # --- legend ---
+        # 6) Legend using our labels
         handles = [
             mpatches.Patch(color=colors[i], label=labels[i])
             for i in range(n)
@@ -124,8 +135,15 @@ def preview_raster(file):
         return fig
 
     except Exception:
+        # Fallback: no valid raster loaded
         fig, ax = plt.subplots(figsize=(5, 5))
-        ax.text(0.5, 0.5, "🗂️ No raster loaded.", ha='center', va='center', color='gray')
+        ax.text(
+            0.5, 0.5,
+            "🗂️ No raster loaded.",
+            ha='center', va='center',
+            color='gray',
+            fontsize=14
+        )
         ax.set_title("Raster Preview", color='dimgray')
         ax.axis('off')
         return fig
@@ -171,61 +189,66 @@ def list_metrics(history):
     return history + [{"role":"assistant","content":"\n".join(lines).strip()}], ""
 
 def compute_metric(file, key, history):
-    # --- read raw + resolution ---
+    # 1) Read raw + res + categories
     with rasterio.open(file.name) as src:
         raw    = src.read(1)
-        x_res, y_res = src.res
+        x_res,y_res = src.res
         nodata = src.nodata or 0
+        cats   = src.categories(1) or {}
 
-    # --- remap strings to ints for pylandstats ---
-    if raw.dtype.kind in ('U','S','O'):
-        data_str    = raw.astype(str)
-        unique_names = np.unique(data_str[data_str != ""])
-        name2code = {name: idx+1 for idx, name in enumerate(unique_names)}
+    # 2) Build a Landscape object from ints
+    if cats:
+        # use raw directly: its values are already 1..N codes
+        arr = raw.astype(int)
+        code2name = cats  # mapping value→string
+        ls = Landscape(arr, res=(x_res,y_res), nodata=0)
 
+    elif raw.dtype.kind in ('U','S','O'):
+        # map strings to 1..N codes
+        data_str = raw.astype(str)
+        unique_names = np.unique(data_str[data_str!=""])
+        name2code = {name: i+1 for i,name in enumerate(unique_names)}
         arr = np.zeros_like(raw, dtype=int)
-        for name, code in name2code.items():
-            arr[data_str == name] = code
+        for name,code in name2code.items():
+            arr[data_str==name] = code
+        code2name = {v:k for k,v in name2code.items()}
+        ls = Landscape(arr, res=(x_res,y_res), nodata=0)
 
-        ls = Landscape(arr, res=(x_res, y_res), nodata=0)
     else:
-        ls = Landscape(file.name, nodata=0, res=(x_res, y_res))
+        # purely numeric raster
+        ls = Landscape(file.name, res=(x_res,y_res), nodata=nodata)
+        code2name = None
 
-    # --- compute metrics ---
+    # 3) Compute DataFrames
     df_land = ls.compute_landscape_metrics_df()
     df_cls  = ls.compute_class_metrics_df()
-    name,_  = metric_definitions[key]
-    col     = col_map.get(key, key)
+    metric_name,_ = metric_definitions[key]
+    col = col_map.get(key, key)
 
-    # --- landscape-level ---
+    # 4) Landscape‐level text
     if key == "np":
-        land_val  = int(df_cls["number_of_patches"].sum())
-        land_part = f"**Landscape-level {name}:** {land_val}\n\n"
+        lv = int(df_cls["number_of_patches"].sum())
+        land_part = f"**Landscape-level {metric_name}:** {lv}\n\n"
     elif col in df_land.columns:
-        land_val  = df_land[col].iloc[0]
-        land_part = f"**Landscape-level {name}:** {land_val:.4f}\n\n"
+        lv = df_land[col].iloc[0]
+        land_part = f"**Landscape-level {metric_name}:** {lv:.4f}\n\n"
     else:
         land_part = ""
 
-    # --- class-level with code:name labels ---
+    # 5) Class‑level table with code:name if available
     df2 = df_cls.rename_axis("code").reset_index()
-    if raw.dtype.kind in ('U','S','O'):
-        # invert mapping
-        code2name = {v: k for k, v in name2code.items()}
-        df2["class_name"] = df2["code"].map(
-            lambda c: f"{c}: {code2name.get(c,'Unknown')}"
-        )
+    if code2name:
+        df2["class_name"] = df2["code"].map(lambda c: f"{c}: {code2name.get(c,'Unknown')}")
     else:
-        df2["class_name"] = df2["code"].map(lambda c: f"{int(c)}: Class {int(c)}")
+        df2["class_name"] = df2["code"].map(lambda c: f"Class {int(c)}")
 
     if col in df2.columns:
         tbl = df2[["class_name", col]].to_markdown(index=False)
     else:
         tbl = "(not available at class level)"
 
-    content = land_part + f"**Class-level {name}:**\n{tbl}"
+    content = land_part + f"**Class-level {metric_name}:**\n{tbl}"
     return history + [{"role":"assistant","content":content}], ""
-
 
 def count_classes(file, history):
     with rasterio.open(file.name) as src:
