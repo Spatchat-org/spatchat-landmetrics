@@ -78,7 +78,7 @@ helper_methods = {
     "pd":           "patch_density",
     "edge_density": "edge_density",
     "lsi":          "landscape_shape_index",
-    "contag":       "contiguity_index",
+    "contag":       "contagion",
     "shdi":         "shannon_diversity_index",
     "shei":         "shannon_evenness_index",
     "mesh":         "effective_mesh_size",
@@ -86,6 +86,7 @@ helper_methods = {
     "lpi":          "largest_patch_index",
     "te":           "total_edge",
 }
+
 
 # Metrics strictly available only at class level:
 class_only = {
@@ -244,65 +245,61 @@ def compute_multiple_metrics(file, keys, history):
     
 # --- Main handler ---
 def analyze_raster(file, question, history):
-    hist  = history + [{"role": "user", "content": question}]
-    lower = question.lower()
+    hist = history + [{"role":"user","content":question}]
 
-    # 1️⃣ Always allow "list metrics"
-    if re.search(r"\b(list|available).*metrics\b", lower):
-        return list_metrics(hist)
+    # 1️⃣ Ask the LLM to parse out what the user wants in a structured way
+    parse = client.chat.completions.create(
+        model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+        messages=[
+            {"role":"system","content":(
+                "Parse the following user request into a JSON with keys:\n"
+                "  count_classes: true/false\n"
+                "  metadata: true/false\n"
+                "  metrics: [list of metric codes]\n"
+                "  level: one of ['landscape','class','both']\n"
+                "  all_metrics: true/false (if they want *all* at a given level)\n"
+                "If unsure, set fields conservatively and let assistant handle missing bits.\n"
+                "Output ONLY valid JSON."
+            )},
+            {"role":"user","content":question}
+        ],
+        temperature=0.0
+    ).choices[0].message.content
 
-    # 2️⃣ Must have a file for everything else
+    # 2️⃣ Safely load that JSON
+    try:
+        req = json.loads(parse)
+    except json.JSONDecodeError:
+        # fallback to regex logic if parsing fails
+        req = {}
+
+    # 3️⃣ If they asked for count or metadata, handle those first
+    if req.get("count_classes"):
+        return count_classes(file, hist)
+    if req.get("metadata"):
+        return answer_metadata(file, hist)
+
+    # 4️⃣ Ensure they’ve uploaded a file for any metric calculation
     if file is None:
-        return hist + [{"role":"assistant","content":
-                        "Please upload a GeoTIFF before asking anything."}], ""
+        return hist + [{"role":"assistant",
+                        "content":"Please upload a GeoTIFF before asking anything."}], ""
 
-    # 3️⃣ Multi‑intent: count classes + metadata in one go
-    want_count = bool(re.search(r"\bnum(ber)? of classes\b", lower))
-    want_meta  = bool(re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower))
-    if want_count or want_meta:
-        chat = hist
-        if want_count:
-            chat, _ = count_classes(file, chat)
-        if want_meta:
-            chat, _ = answer_metadata(file, chat)
-        return chat, ""
+    # 5️⃣ Determine which metrics to compute
+    metrics = req.get("metrics", [])
+    # if they said “all_metrics” at a specific level:
+    if req.get("all_metrics") and req.get("level") == "landscape":
+        metrics = [m for m in metric_definitions if m not in class_only]
+    if req.get("all_metrics") and req.get("level") == "class":
+        metrics = list(class_only)
 
-    # 4️⃣ Detect explicit level qualifiers
-    is_land  = bool(re.search(r"\blandscape[- ]level\b", lower))
-    is_class = bool(re.search(r"\bclass[- ]level\b",     lower))
-
-    # 5️⃣ "all ... metrics" shortcuts
-    if is_land and "all" in lower:
-        found = [c for c in metric_definitions if c not in class_only]
-    elif is_class and "all" in lower:
-        found = list(class_only)
-    else:
-        # 6️⃣ Otherwise pick out explicit metric names
-        found = []
-        for code, (fullname, _) in metric_definitions.items():
-            for syn in synonyms.get(code, [code, fullname.lower()]):
-                if re.search(rf"\b{re.escape(syn)}\b", lower) and code not in found:
-                    found.append(code)
-
-    # 7️⃣ Nothing matched?  Fallback to the LLM
-    if not found:
-        return llm_fallback(hist)
-
-    # 8️⃣ Dispatch based on how many and which level
-    if len(found) > 1:
-        if is_land:
-            return compute_landscape_only(file, found, hist)
-        if is_class:
-            return compute_class_only(file, found, hist)
-        return compute_multiple_metrics(file, found, hist)
-    else:
-        key = found[0]
-        if is_land:
-            return compute_landscape_only(file, [key], hist)
-        if is_class:
-            return compute_class_only(file, [key], hist)
-        return compute_multiple_metrics(file, [key], hist)
-
+    # 6️⃣ Route to the right computation
+    level = req.get("level", "both")
+    if level == "landscape":
+        return compute_landscape_only(file, metrics, hist)
+    if level == "class":
+        return compute_class_only(file, metrics, hist)
+    # default when they want both or didn’t specify
+    return compute_multiple_metrics(file, metrics, hist)
 
 def count_classes(file, history):
     with rasterio.open(file.name) as src:
