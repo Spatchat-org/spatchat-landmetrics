@@ -71,10 +71,7 @@ col_map = {
     "core": "total_core_area",
     "nca": "number_of_core_areas",
     "cai": "core_area_index",
-}
-,
-        "edge_density":"edge_density",
-    }.items()
+    "edge_density":"edge_density",
 }
 
 # --- Level categories ---
