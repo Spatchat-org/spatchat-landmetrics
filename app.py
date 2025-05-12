@@ -75,25 +75,25 @@ col_map = {
 
 # --- Level categories ---
 helper_methods = {
-    "pd":"patch_density",
-    "edge_density":"edge_density",
-    "lsi":"landscape_shape_index",
-    "contag":"contagion_index",
-    "shdi":"shannon_diversity_index",
-    "shei":"shannon_evenness_index",
-    "mesh":"effective_mesh_size",
-    "tca":"total_core_area",
-    "lpi":"largest_patch_index",
-    "te":"total_edge",
+    "pd": "patch_density",
+    "edge_density": "edge_density",
+    "lsi": "landscape_shape_index",
+    "contag": "contagion_index",
+    "shdi": "shannon_diversity_index",
+    "shei": "shannon_evenness_index",
+    "mesh": "effective_mesh_size",
+    "tca": "total_core_area",
+    "lpi": "largest_patch_index",
+    "te": "total_edge",
 }
-class_only = {"pland","area","perim","para","shape","frac","enn","core","nca","cai"}
-cross_level = ["np","pd","lpi","te","edge_density"]
+class_only = {"pland", "area", "perim", "para", "shape", "frac", "enn", "core", "nca", "cai"}
+cross_level = ["np", "pd", "lpi", "te", "edge_density"]
 
 # --- Raster preview ---
 def no_raster_fig():
     fig, ax = plt.subplots(figsize=(5,5))
-    ax.text(0.5,0.5,"🗂️ No raster loaded.",ha='center',va='center',color='gray',fontsize=14)
-    ax.set_title("Raster Preview",color='dimgray')
+    ax.text(0.5, 0.5, "🗂️ No raster loaded.", ha='center', va='center', color='gray', fontsize=14)
+    ax.set_title("Raster Preview", color='dimgray')
     ax.axis('off')
     return fig
 
@@ -106,33 +106,34 @@ def preview_raster(file):
     if raw.dtype.kind in ('U','S','O'):
         data = raw.astype(str)
         uniq = np.unique(data[data!=""])
-        arr = np.zeros_like(raw,dtype=int)
-        for i,nm in enumerate(uniq,1): arr[data==nm]=i
-        labels = [f"{i}: {nm}" for i,nm in enumerate(uniq,1)]
+        arr = np.zeros_like(raw, dtype=int)
+        for i, nm in enumerate(uniq, 1):
+            arr[data == nm] = i
+        labels = [f"{i}: {nm}" for i, nm in enumerate(uniq, 1)]
     else:
         arr = raw
-        vals = np.unique(arr[arr!=nodata])
+        vals = np.unique(arr[arr != nodata])
         labels = [f"Class {int(v)}" for v in vals]
     n = len(labels)
-    cmap = plt.cm.tab10(np.linspace(0,1,n))
-    fig,ax = plt.subplots(figsize=(5,5))
-    ax.imshow(arr,cmap='tab10')
+    colors = plt.cm.tab10(np.linspace(0,1,n))
+    fig, ax = plt.subplots(figsize=(5,5))
+    ax.imshow(arr, cmap='tab10')
     ax.set_title("Uploaded Raster")
     ax.axis('off')
-    handles = [mpatches.Patch(color=c,label=l) for c,l in zip(cmap,labels)]
-    ax.legend(handles=handles,loc='lower left',fontsize='small')
+    handles = [mpatches.Patch(color=c, label=l) for c, l in zip(colors, labels)]
+    ax.legend(handles=handles, loc='lower left', fontsize='small')
     return fig
 
 def clear_raster():
-    return None, gr.update(value=no_raster_fig(),visible=True)
+    return None, gr.update(value=no_raster_fig(), visible=True)
 
-def notify_upload(file,history):
+def notify_upload(file, history):
     if file:
-        return history + [{"role":"assistant","content":"📥 Raster uploaded successfully!"}], ""
+        return history + [{"role": "assistant", "content": "📥 Raster uploaded successfully!"}], ""
     return history, ""
 
 # --- Handlers ---
-def answer_metadata(file,history):
+def answer_metadata(file, history):
     with rasterio.open(file.name) as src:
         text = (
             f"CRS: {src.crs}\n"
@@ -141,88 +142,93 @@ def answer_metadata(file,history):
             f"Bands: {src.count}\n"
             f"NoData: {src.nodata}"
         )
-    return history + [{"role":"assistant","content":text}], ""
+    return history + [{"role": "assistant", "content": text}], ""
 
-def count_classes(file,history):
+def count_classes(file, history):
     with rasterio.open(file.name) as src:
         arr = src.read(1)
         nodata = src.nodata or 0
-    vals = np.unique(arr[arr!=nodata])
-    return history + [{"role":"assistant","content":f"Your raster contains {len(vals)} unique classes."}], ""
+    vals = np.unique(arr[arr != nodata])
+    return history + [{"role": "assistant", "content": f"Your raster contains {len(vals)} unique classes."}], ""
 
 def list_metrics(history):
-    lines=["**Cross‑level metrics:**"]
+    lines = ["**Cross‑level metrics:**"]
     lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in cross_level]
     lines.append("\n**Landscape‑only:**")
     lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in helper_methods]
     lines.append("\n**Class‑only:**")
     lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in class_only]
-    return history + [{"role":"assistant","content":"\n".join(lines)}], ""
+    return history + [{"role": "assistant", "content": "\n".join(lines)}], ""
 
-def compute_landscape_only(file,keys,history):
+def compute_landscape_only(file, keys, history):
     ls = Landscape(file.name, nodata=0, res=(1,1))
-    parts=[]
+    parts = []
     for key in keys:
         name = metric_definitions[key][0]
-        if key=="np":
+        if key == "np":
             df = ls.compute_class_metrics_df(metrics=["number_of_patches"])
-            val = df.number_of_patches.sum()
+            val = int(df.number_of_patches.sum())
         elif key in helper_methods:
             val = getattr(ls, helper_methods[key])()
         else:
-            val = ls.compute_landscape_metrics_df(metrics=[col_map[key]]).iloc[0,0]
-        parts.append(f"**{name}:** {val:.4f}" if isinstance(val,float) else f"**{name}:** {int(val)}")
-    return history + [{"role":"assistant","content":"\n\n".join(parts)}], ""
+            val = ls.compute_landscape_metrics_df(metrics=[col_map[key]]).iloc[0, 0]
+        parts.append(f"**{name}:** {val:.4f}" if isinstance(val, float) else f"**{name}:** {val}")
+    return history + [{"role": "assistant", "content": "\n\n".join(parts)}], ""
 
-def compute_class_only(file,keys,history):
+def compute_class_only(file, keys, history):
     ls = Landscape(file.name, nodata=0, res=(1,1))
-    cols=[col_map[k] for k in keys]
-    df=ls.compute_class_metrics_df(metrics=cols).rename_axis("code").reset_index()
-    df["class_name"]="Class "+df.code.astype(int).astype(str)
-    table=df[["class_name"]+cols].to_markdown(index=False)
-    return history + [{"role":"assistant","content":f"**Class metrics:**\n{table}"}], ""
+    cols = [col_map[k] for k in keys]
+    df = ls.compute_class_metrics_df(metrics=cols).rename_axis("code").reset_index()
+    df["class_name"] = df["code"].astype(int).astype(str).rjust(0, "Class ")
+    table = df[["class_name"] + cols].to_markdown(index=False)
+    return history + [{"role": "assistant", "content": f"**Class metrics:**\n{table}"}], ""
 
-def compute_multiple_metrics(file,keys,history):
-    hl,_=compute_landscape_only(file,keys,history)
-    hc,_=compute_class_only(file,keys,history)
-    return history+[hl[-1],hc[-1]], ""
+def compute_multiple_metrics(file, keys, history):
+    hl, _ = compute_landscape_only(file, keys, history)
+    hc, _ = compute_class_only(file, keys, history)
+    return history + [hl[-1], hc[-1]], ""
 
 def llm_fallback(history):
-    resp=client.chat.completions.create(
+    resp = client.chat.completions.create(
         model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-        messages=[{"role":"system","content":"You are Spatchat, assist with landscape metrics."}]+history,
+        messages=[{"role": "system", "content": "You are Spatchat, assist with landscape metrics."}] + history,
         temperature=0.4
     ).choices[0].message.content
-    return history+[{"role":"assistant","content":resp}], ""
+    return history + [{"role": "assistant", "content": resp}], ""
 
 # --- Main handler (shortcut) ---
-def analyze_raster(file,question,history):
-    history,_=notify_upload(file,history)
-    lower=question.lower()
-    if re.search(r"\b(list|available).*metrics\b",lower):
+def analyze_raster(file, question, history):
+    history, _ = notify_upload(file, history)
+    lower = question.lower()
+
+    if re.search(r"\b(list|available).*metrics\b", lower):
         return list_metrics(history)
-    if file is None:
-        return history+[{"role":"assistant","content":"Please upload a GeoTIFF first."}], ""
-    if re.search(r"how many classes",lower):
-        return count_classes(file,history)
-    if re.search(r"\b(crs|resolution|extent|bands|nodata)\b",lower):
-        return answer_metadata(file,history)
+    if not file:
+        return history + [{"role": "assistant", "content": "Please upload a GeoTIFF first."}], ""
+    if re.search(r"how many classes", lower):
+        return count_classes(file, history)
+    if re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower):
+        return answer_metadata(file, history)
+
     # find metrics
-    found=[]
+    found = []
     for code in metric_definitions:
-        for syn in synonyms.get(code,[code]):
+        for syn in synonyms.get(code, [code]):
             if syn in lower and code not in found:
                 found.append(code)
+
     if not found:
         return llm_fallback(history)
+
     # dispatch
-    if len(found)>1:
-        return compute_multiple_metrics(file,found,history)
-    return compute_landscape_only(file,found,history) 
-    
-    if any(f in helper_methods or f=="np" for f in found) 
-    
-    else compute_class_only(file,found,history)
+    if len(found) > 1:
+        return compute_multiple_metrics(file, found, history)
+    # single metric: decide level
+    if any((f == "np") or (f in helper_methods) for f in found):
+        return compute_landscape_only(file, found, history)
+    else:
+        return compute_class_only(file, found, history)
+
 
 # --- UI setup & launch ---
 initial_history = [{"role":"assistant","content":"👋 Hi! I’m Spatchat. Upload a GeoTIFF to begin—then ask for any landscape metric."}]
