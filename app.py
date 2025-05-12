@@ -147,14 +147,12 @@ def answer_metadata(file, history):
 
 def count_classes(file, history):
     """
-    Counts unique classes using pylandstats to ensure all present classes are captured, bypassing nodata issues.
+    Counts unique classes using pylandstats's class metrics DataFrame.
     """
-    # Build the landscape object (handles nodata internally)
     ls = _build_landscape(file)
-    # Compute class metrics & count rows
     df = ls.compute_class_metrics_df(metrics=["number_of_patches"]).rename_axis("code").reset_index()
     num = df.shape[0]
-    return history + [{"role":"assistant","content":f"Your raster contains {num} unique classes."}], {"role":"assistant","content":f"Your raster contains {len(vals)} unique classes."}], ""
+    return history + [{"role":"assistant","content":f"Your raster contains {num} unique classes."}], ""
 
 def list_metrics(history):
     lines = ["**Cross‑level metrics (Landscape & Class):**"]
