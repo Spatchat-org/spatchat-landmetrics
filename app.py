@@ -238,27 +238,28 @@ def run_compute_metrics(file, raw_metrics, level):
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # 2) dispatch based on explicit level or single/multi metrics
-    #  a) explicit landscape request
-    if level == "landscape":
+    # 2) if the user explicitly asked "landscape" or "class", honor that
         land = [c for c in mapped if c not in class_only]
         return compute_landscape_only_text(file, land)
 
-    #  b) explicit class request
     if level == "class":
-        return compute_class_only_text(file, mapped)
+        clas = [c for c in mapped if c in class_only]
+        return compute_class_only_text(file, clas)
 
-    #  c) no explicit level: single metric?
-    if len(mapped) == 1:
-        key = mapped[0]
-        if key in cross_level:
-            # single cross‑level → landscape summary
-            return compute_landscape_only_text(file, [key])
-        else:
-            # single class‑only → class table
-            return compute_class_only_text(file, [key])
+    # 3) otherwise infer from the mix of codes
+    has_x = any(c in cross_level for c in mapped)
+    has_c = any(c in class_only   for c in mapped)
 
-    #  d) multi‑metric default → class‑level table
+    # a) mixed → both
+    if has_x and has_c:
+        return compute_multiple_metrics_text(file, mapped)
+
+    # b) only cross‑level → landscape only
+    if has_x:
+        land = [c for c in mapped if c in cross_level]
+        return compute_landscape_only_text(file, land)
+
+    # c) only class‑level → class only
     return compute_class_only_text(file, mapped)
 
 
@@ -296,6 +297,22 @@ def analyze_raster(file, user_msg, history):
         hist.append({"role":"assistant","content":
                      "Please upload a GeoTIFF before asking anything."})
         return hist, ""
+
+    # ─── Zero‑prompt shortcuts ───────────────────────────────────────────────
+    # “all landscape level metrics”
+    if re.search(r"\ball landscape(?: level)? metrics\b", lower):
+        keys = [k for k in metric_map if metric_map.get(k) and k not in class_only]
+        return hist + [{"role":"assistant","content":compute_landscape_only_text(file, keys)}], ""
+
+    # “all class level metrics”
+    if re.search(r"\ball class(?: level)? metrics\b", lower):
+        keys = list(class_only)
+        return hist + [{"role":"assistant","content":compute_class_only_text(file, keys)}], ""
+
+    # “all metrics”
+    if re.search(r"\ball metrics\b", lower):
+        keys = [k for k in metric_map if metric_map.get(k)]
+        return hist + [{"role":"assistant","content":compute_multiple_metrics_text(file, keys)}], ""
 
     # 2️⃣ Ask the LLM which tool to call
     resp = client.chat.completions.create(
