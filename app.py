@@ -328,7 +328,8 @@ with gr.Blocks(title="Spatchat") as iface:
         with gr.Column(scale=1):
             chatbot        = gr.Chatbot(value=initial_history, type="messages",
                                        label="Spatchat Dialog")
-            question_input = gr.Textbox(placeholder="e.g. calculate edge density",\n                                       lines=1)
+            question_input = gr.Textbox(placeholder="e.g. calculate edge density",  
+                                        lines=1)
             clear_button   = gr.Button("Clear Chat")
 )
     file_input.change(preview_raster, inputs=file_input, outputs=raster_output)
