@@ -75,16 +75,17 @@ col_map = {
 
 # --- Level categories ---
 helper_methods = {
-    "pd": "patch_density",
-    "edge_density": "edge_density",
-    "lsi": "landscape_shape_index",
-    "contag": "contagion_index",
-    "shdi": "shannon_diversity_index",
-    "shei": "shannon_evenness_index",
-    "mesh": "effective_mesh_size",
-    "tca": "total_core_area",
-    "lpi": "largest_patch_index",
-    "te": "total_edge",
+    # cross‑level “fast” helpers
+    "pd":           "patch_density",             # Patch Density
+    "edge_density": "edge_density",             # Edge Density
+    "lsi":          "landscape_shape_index",     # Landscape Shape Index
+    "contag":       "contiguity_index",         # Contagion Index (method name in pylandstats is contiguity_index)
+    "shdi":         "shannon_diversity_index",   # Shannon Diversity Index
+    "shei":         "shannon_evenness_index",    # Shannon Evenness Index
+    "mesh":         "effective_mesh_size",       # Effective Mesh Size
+    "tca":          "total_core_area",           # Total Core Area
+    "lpi":          "largest_patch_index",       # Largest Patch Index
+    "te":           "total_edge",                # Total Edge
 }
 class_only = {"pland", "area", "perim", "para", "shape", "frac", "enn", "core", "nca", "cai"}
 cross_level = ["np", "pd", "lpi", "te", "edge_density"]
