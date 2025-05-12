@@ -160,20 +160,58 @@ def list_metrics(history):
     lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in class_only]
     return history + [{"role": "assistant", "content": "\n".join(lines)}], ""
 
+def _build_landscape(file):
+    import rasterio, numpy as np
+    from pylandstats import Landscape
+
+    with rasterio.open(file.name) as src:
+        raw    = src.read(1)
+        x_res, y_res = src.res
+        nodata = src.nodata or 0
+
+    # If you have string‐labeled classes, map to ints
+    if raw.dtype.kind in ("U","S","O"):
+        data_str   = raw.astype(str)
+        uniq_names = np.unique(data_str[data_str!=""])
+        name2code  = {nm: i+1 for i,nm in enumerate(uniq_names)}
+        arr        = np.zeros_like(raw, dtype=int)
+        for nm, code in name2code.items():
+            arr[data_str==nm] = code
+        return Landscape(arr, res=(x_res, y_res), nodata=0)
+
+    # Otherwise feed the file directly
+    return Landscape(file.name, nodata=nodata, res=(x_res, y_res))
+
+
 def compute_landscape_only(file, keys, history):
-    ls = Landscape(file.name, nodata=0, res=(1,1))
+    ls    = _build_landscape(file)
     parts = []
+
     for key in keys:
-        name = metric_definitions[key][0]
+        name, _ = metric_definitions[key]
+
+        # cross‑level NP
         if key == "np":
             df = ls.compute_class_metrics_df(metrics=["number_of_patches"])
-            val = int(df.number_of_patches.sum())
+            val = int(df["number_of_patches"].sum())
+
+        # fast helpers
         elif key in helper_methods:
             val = getattr(ls, helper_methods[key])()
+
+        # true landscape‑only
         else:
-            val = ls.compute_landscape_metrics_df(metrics=[col_map[key]]).iloc[0, 0]
-        parts.append(f"**{name}:** {val:.4f}" if isinstance(val, float) else f"**{name}:** {val}")
-    return history + [{"role": "assistant", "content": "\n\n".join(parts)}], ""
+            df  = ls.compute_landscape_metrics_df(metrics=[col_map[key]])
+            val = df[col_map[key]].iloc[0]
+
+        # format
+        if isinstance(val, float):
+            parts.append(f"**{name} ({key.upper()}):** {val:.4f}")
+        else:
+            parts.append(f"**{name} ({key.upper()}):** {val}")
+
+    content = "\n\n".join(parts)
+    return history + [{"role":"assistant","content":content}], ""
 
 def compute_class_only(file, keys, history):
     """
@@ -201,23 +239,19 @@ def compute_class_only(file, keys, history):
 
 
 def compute_multiple_metrics(file, keys, history):
-    """
-    Compute both landscape- and class-level metrics for the given keys.
-    Landscape-level is only run on keys *not* in class_only, then
-    class-level is run on *all* keys.
-    """
-    # split your keys
+    # landscape_keys = only those that make sense at the landscape level
     landscape_keys = [k for k in keys if k not in class_only]
+    # class_keys = we always want the full set at class level
     class_keys     = keys
 
-    # 1️⃣ run landscape-only on the filtered set (if any)
+    # run landscape‑only first (if any)
     chat, _ = (
         compute_landscape_only(file, landscape_keys, history)
         if landscape_keys
         else (history, "")
     )
 
-    # 2️⃣ run class-only on the full set, appending to the same chat
+    # then append the class‑only table
     chat, _ = compute_class_only(file, class_keys, chat)
 
     return chat, ""
