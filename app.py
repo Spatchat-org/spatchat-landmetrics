@@ -1,6 +1,5 @@
 import os
 import re
-import json
 import gradio as gr
 import rasterio
 import numpy as np
@@ -9,6 +8,7 @@ import matplotlib.patches as mpatches
 from pylandstats import Landscape
 from together import Together
 from dotenv import load_dotenv
+import json
 
 # --- LLM setup ---
 load_dotenv()
@@ -49,7 +49,7 @@ synonyms = {
     "te":           ["te", "total edge", "total_edge"],
 }
 
-# --- Map our codes to actual DataFrame column names ---
+# --- Map codes to DataFrame columns ---
 col_map = {
     "pland":        "proportion_of_landscape",
     "np":           "number_of_patches",
@@ -74,12 +74,12 @@ col_map = {
     "cai":          "core_area_index",
 }
 
-# --- Helper mappings for metrics ---
+# --- Helper mappings & level categorization ---
 helper_methods = {
     "pd":           "patch_density",
     "edge_density": "edge_density",
     "lsi":          "landscape_shape_index",
-    "contag":       "contagion",
+    "contag":       "contagion_index",
     "shdi":         "shannon_diversity_index",
     "shei":         "shannon_evenness_index",
     "mesh":         "effective_mesh_size",
@@ -87,7 +87,6 @@ helper_methods = {
     "lpi":          "largest_patch_index",
     "te":           "total_edge",
 }
-
 
 # Metrics strictly available only at class level:
 class_only = {
@@ -99,7 +98,7 @@ class_only = {
 # Metrics available at both landscape & class levels:
 cross_level = ["np", "pd", "lpi", "te", "edge_density"]
 
-# --- Raster preview & clear ---
+# --- Raster preview ---
 def no_raster_fig():
     fig, ax = plt.subplots(figsize=(5, 5))
     ax.text(0.5, 0.5, "🗂️ No raster loaded.", ha='center', va='center', color='gray', fontsize=14)
@@ -128,7 +127,7 @@ def preview_raster(file):
         else:
             data = raw
             vals = np.unique(data[data != nodata])
-            labels = [f"{int(v)}: Class {int(v)}" for v in vals]
+            labels = [f"Class {int(v)}" for v in vals]
             n = len(vals)
 
         colors = plt.cm.tab10(np.linspace(0,1,n))
@@ -136,11 +135,9 @@ def preview_raster(file):
         ax.imshow(data, cmap='tab10', interpolation='nearest', vmin=1, vmax=n)
         ax.set_title("Uploaded Raster")
         ax.axis('off')
-        handles = [mpatches.Patch(color=colors[i], label=labels[i])
-                   for i in range(n)]
+        handles = [mpatches.Patch(color=colors[i], label=labels[i]) for i in range(n)]
         ax.legend(handles=handles, loc='lower left', fontsize='small', frameon=True)
         return fig
-
     except Exception as e:
         print("preview_raster error:", e)
         return no_raster_fig()
@@ -148,8 +145,8 @@ def preview_raster(file):
 def clear_raster():
     fig = no_raster_fig()
     return None, gr.update(value=fig, visible=True)
-# --- Handlers ---
 
+# --- Handlers ---
 def answer_metadata(file, history):
     with rasterio.open(file.name) as src:
         crs     = src.crs
@@ -163,48 +160,43 @@ def answer_metadata(file, history):
         f"Resolution: {x_res:.2f} × {y_res:.2f} {unit}",
         f"Extent: {extent}",
         f"Bands: {bands}",
-        f"NoData value: {nodata}"
+        f"NoData value: {nodata}" 
     ])
     return history + [{"role":"assistant","content":text}], ""
 
-# --- Metrics listing ---
 def list_metrics(history):
-    lines = []
-    lines.append("**Cross‑level metrics (Landscape & Class):**")
+    lines = ["**Cross‑level metrics (Landscape & Class):**"]
     for k in cross_level:
         name, _ = metric_definitions[k]
         lines.append(f"- {name} (`{k}`)")
-    lines.append("")
-    lines.append("**Landscape‑only metrics:**")
+    lines.append("\n**Landscape‑only metrics:**")
     for k in helper_methods:
         name, _ = metric_definitions[k]
         lines.append(f"- {name} (`{k}`)")
-    lines.append("")
-    lines.append("**Class‑only metrics:**")
+    lines.append("\n**Class‑only metrics:**")
     for k in class_only:
         name, _ = metric_definitions[k]
         lines.append(f"- {name} (`{k}`)")
     content = "\n".join(lines)
-    return history + [{"role": "assistant", "content": content}], ""
+    return history + [{"role":"assistant","content":content}], ""
 
-# --- Core compute helpers ---
+# --- Compute helpers ---
 def _build_landscape(file):
     with rasterio.open(file.name) as src:
         raw = src.read(1)
         x_res, y_res = src.res
         nodata = src.nodata or 0
-    if raw.dtype.kind in ("U", "S", "O"):
+    if raw.dtype.kind in ("U","S","O"):
         data_str = raw.astype(str)
         uniq = np.unique(data_str[data_str!=""])
-        name2code = {nm: i+1 for i, nm in enumerate(uniq)}
+        name2code = {nm: i+1 for i,nm in enumerate(uniq)}
         arr = np.zeros_like(raw, dtype=int)
         for nm, code in name2code.items():
             arr[data_str==nm] = code
-        ls = Landscape(arr, res=(x_res, y_res), nodata=0)
+        ls = Landscape(arr, res=(x_res,y_res), nodata=0)
     else:
-        ls = Landscape(file.name, nodata=nodata, res=(x_res, y_res))
+        ls = Landscape(file.name, nodata=nodata, res=(x_res,y_res))
     return ls
-
 
 def compute_landscape_only(file, keys, history):
     ls = _build_landscape(file)
@@ -221,8 +213,7 @@ def compute_landscape_only(file, keys, history):
             val = df[col_map[key]].iloc[0]
         parts.append(f"**{name} ({key.upper()}):** {val:.4f}" if isinstance(val, float) else f"**{name} ({key.upper()}):** {val}")
     content = "\n\n".join(parts)
-    return history + [{"role": "assistant", "content": content}], ""
-
+    return history + [{"role":"assistant","content":content}], ""
 
 def compute_class_only(file, keys, history):
     ls = _build_landscape(file)
@@ -231,45 +222,31 @@ def compute_class_only(file, keys, history):
     df["class_name"] = df["code"].map(lambda c: f"Class {int(c)}")
     tbl = df[["class_name"] + cols].to_markdown(index=False)
     content = f"**Class-level metrics:**\n{tbl}"
-    return history + [{"role": "assistant", "content": content}], ""
-
+    return history + [{"role":"assistant","content":content}], ""
 
 def compute_multiple_metrics(file, keys, history):
-    # split into what we can do at landscape vs. class levels
-    land_keys  = [k for k in keys if k not in class_only]
-    class_keys = keys
-    hl, _ = compute_landscape_only(file, land_keys, history)
-    hc, _ = compute_class_only(file, class_keys, history)
-    land_msg = hl[-1]
-    class_msg = hc[-1]
-    return history + [land_msg, class_msg], ""
-    
+    hl, _ = compute_landscape_only(file, keys, history)
+    hc, _ = compute_class_only(file, keys, history)
+    return history + [hl[-1], hc[-1]], ""
+
 # --- Main handler ---
 def analyze_raster(file, question, history):
-    hist  = history + [{"role":"user","content":question}]
+    hist = history + [{"role":"user","content":question}]
     lower = question.lower()
 
-    # 1️⃣ LIST METRICS always allowed
-    if re.search(r"\b(list|available).*metrics\b", lower):
-        return list_metrics(hist)
-
-    # 2️⃣ FILE REQUIRED for anything else
-    if file is None:
-        return hist + [{"role":"assistant","content":
-                        "Please upload a GeoTIFF before asking anything."}], ""
-
-    # 3️⃣ PARSE INTENTS via LLM
+    # 1️⃣ Parse all intents using LLM
     parse = client.chat.completions.create(
         model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
         messages=[
             {"role":"system","content":(
-                "Parse the user request into JSON with fields:\n"
-                "- count_classes (bool)\n"
-                "- metadata (bool)\n"
-                "- metrics (list of metric codes)\n"
-                "- level: 'landscape','class', or 'both'\n"
-                "- all_metrics (bool)\n"
-                "Return ONLY valid JSON."
+                "Parse the user request into JSON with these fields:\n"
+                "- list_metrics: true/false\n"
+                "- count_classes: true/false\n"
+                "- metadata: true/false\n"
+                "- metrics: [list of metric codes]\n"
+                "- level: 'landscape', 'class', or 'both'\n"
+                "- all_metrics: true/false\n"
+                "Output only valid JSON."
             )},
             {"role":"user","content":question}
         ],
@@ -281,64 +258,43 @@ def analyze_raster(file, question, history):
     except json.JSONDecodeError:
         req = {}
 
-    # 4️⃣ HANDLE count_classes & metadata
+    # 2️⃣ Handle simple list/metadata/class-count intents
+    if req.get("list_metrics"):
+        return list_metrics(hist)
     if req.get("count_classes"):
         return count_classes(file, hist)
     if req.get("metadata"):
         return answer_metadata(file, hist)
 
-    # 5️⃣ FIGURE OUT METRICS & LEVEL
-    metrics    = req.get("metrics", [])
-    level      = req.get("level", "both")
-    all_m      = req.get("all_metrics", False)
+    # 3️⃣ Ensure GeoTIFF is loaded for any metric work
+    if file is None:
+        return hist + [{"role":"assistant","content":
+                        "Please upload a GeoTIFF before asking anything."}], ""
 
-    # 6️⃣ SHORT‑CIRCUIT if no metrics requested
-    if not (metrics or all_m):
-        return llm_fallback(hist)
+    # 4️⃣ Build metric list
+    metrics = req.get("metrics", [])
+    level   = req.get("level",   "both")
+    all_m   = req.get("all_metrics", False)
 
-    # 7️⃣ EXPAND "all_metrics"
+    # 5️⃣ Expand 'all_metrics' if requested
     if all_m:
         if level == "landscape":
             metrics = [m for m in metric_definitions if m not in class_only]
         elif level == "class":
             metrics = list(class_only)
 
-    # 8️⃣ DISPATCH
+    # 6️⃣ If no metrics at this point, fallback
+    if not metrics:
+        return llm_fallback(hist)
+
+    # 7️⃣ Dispatch to the correct helper
     if level == "landscape":
         return compute_landscape_only(file, metrics, hist)
     if level == "class":
         return compute_class_only(file, metrics, hist)
     return compute_multiple_metrics(file, metrics, hist)
 
-def count_classes(file, history):
-    with rasterio.open(file.name) as src:
-        raw = src.read(1)
-        nodata = src.nodata or 0
-    if raw.dtype.kind in ('U','S','O'):
-        vals = np.unique(raw.astype(str)[raw.astype(str)!=""])
-    else:
-        vals = np.unique(raw[raw!=nodata])
-    return history + [{
-        "role":"assistant",
-        "content":f"Your raster contains {len(vals)} unique classes."
-    }], ""
-
-def llm_fallback(history):
-    prompt = [
-        {"role":"system","content":(
-            "You are Spatchat, a helpful assistant in calculating and summarizing landscape metrics. \n"
-            "Use rasterio for metadata and pylandstats for metrics; otherwise be conversational."
-        )},
-        *history
-    ]
-    resp = client.chat.completions.create(
-        model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-        messages=prompt,
-        temperature=0.4
-    ).choices[0].message.content
-    return history + [{"role":"assistant","content":resp}], ""
-
-# --- UI layout ---
+# --- UI layout & launch ---
 initial_history = [
     {"role":"assistant","content":
      "👋 Hi! I’m Spatchat. Upload a GeoTIFF to begin—then ask for CRS, resolution, extent, or any landscape metric."}
@@ -362,8 +318,8 @@ with gr.Blocks(title="Spatchat") as iface:
           📋 Copy Share Link
         </button>
       </div>
-    ''')
-
+    '''
+)
     with gr.Row():
         with gr.Column(scale=1):
             file_input          = gr.File(label="Upload GeoTIFF", type="filepath")
@@ -372,10 +328,9 @@ with gr.Blocks(title="Spatchat") as iface:
         with gr.Column(scale=1):
             chatbot        = gr.Chatbot(value=initial_history, type="messages",
                                        label="Spatchat Dialog")
-            question_input = gr.Textbox(placeholder="e.g. calculate edge density",
-                                       lines=1)
+            question_input = gr.Textbox(placeholder="e.g. calculate edge density",\n                                       lines=1)
             clear_button   = gr.Button("Clear Chat")
-
+)
     file_input.change(preview_raster, inputs=file_input, outputs=raster_output)
     clear_raster_button.click(clear_raster, inputs=None,
                               outputs=[file_input, raster_output])
