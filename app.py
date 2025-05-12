@@ -196,7 +196,11 @@ def compute_class_only_text(file, keys):
 def compute_multiple_metrics_text(file, keys):
     # split into pure‑landscape vs class‑only
     land_keys  = [c for c in keys if c not in class_only]
-    class_keys = [c for c in keys if c in class_only]
+    class_keys = [c for c in keys if c     in class_only]
+
+    # ── PATCH: if they asked only cross‑level metrics, also show them per‑class ──
+    if land_keys and not class_keys:
+        class_keys = land_keys.copy()
 
     out = []
     if land_keys:
@@ -205,6 +209,7 @@ def compute_multiple_metrics_text(file, keys):
         out.append(compute_class_only_text(file, class_keys))
 
     return "\n\n".join(out)
+
 
 # ───── Your “tools” ─────────────────────────────────────────────────────
 
@@ -218,8 +223,9 @@ def run_list_metrics(file):
     return list_metrics_text()
 
 def run_compute_metrics(file, raw_metrics, level):
-    # 1) normalize + map synonyms & reject None‑mapped
-    mapped, unknown = [], []
+    # 1) normalize + map synonyms & reject unmapped codes
+    mapped = []
+    unknown = []
     for m in raw_metrics:
         ml = m.lower()
         if ml in metric_definitions:
@@ -227,37 +233,39 @@ def run_compute_metrics(file, raw_metrics, level):
         elif ml in reverse_synonyms:
             cand = reverse_synonyms[ml]
         else:
-            unknown.append(m); continue
+            unknown.append(m)
+            continue
+
+        # drop those with no mapping in metric_map (e.g. 'shei')
         if metric_map.get(cand) is None:
             unknown.append(m)
         else:
             mapped.append(cand)
+
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # 2) split into cross‑level vs class‑only
-    land = [c for c in mapped if c in cross_level]
-    clas = [c for c in mapped if c in class_only]
+    # split into class‑only vs cross‑level
+    land  = [c for c in mapped if c not in class_only]
+    clas  = [c for c in mapped if c in class_only]
 
-    # --- New bit: if they only asked cross‑level, also do those at class level ---
-    if land and not clas:
-        clas = land.copy()
-
-    # 3) honor explicit level flags
+    # 2) honor explicit level
     if level == "landscape":
-        return compute_landscape_only_text(file, land or mapped)
+        return compute_landscape_only_text(file, land)
     if level == "class":
-        return compute_class_only_text(file, clas or mapped)
+        return compute_class_only_text   (file, mapped)
     if level == "both":
         return compute_multiple_metrics_text(file, mapped)
 
-    # 4) infer: mixed → both; only cross‑level (now with clas populated) → both; only class → class
-    if land and clas:
+    # 3) no explicit level → infer defaults
+    #  a) all class‑only → class table
+    if all(c in class_only    for c in mapped):
+        return compute_class_only_text   (file, mapped)
+    #  b) all cross‑level → BOTH landscape + class
+    if all(c in cross_level    for c in mapped):
         return compute_multiple_metrics_text(file, mapped)
-    if land:
-        return compute_multiple_metrics_text(file, mapped)
-    return compute_class_only_text(file, mapped)
-
+    #  c) mixture → BOTH
+    return compute_multiple_metrics_text(file, mapped)
 
 
 # ───── System & Fallback Prompts ────────────────────────────────────────
