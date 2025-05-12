@@ -241,23 +241,25 @@ def run_compute_metrics(file, raw_metrics, level):
     land = [c for c in mapped if c not in class_only]
     clas = [c for c in mapped if c in class_only]
 
-    # 3) honor explicit level
+    # 3) honor explicit level requests
     if level == "landscape":
         return compute_landscape_only_text(file, land)
     if level == "class":
-        return compute_class_only_text(file, clas)
+        return compute_class_only_text(file, mapped)
     if level == "both":
         return compute_multiple_metrics_text(file, mapped)
 
-    # 4) infer from the mix
+    # 4) infer from the mix of requested codes
     has_x = bool(land)
     has_c = bool(clas)
+
     if has_x and has_c:
         return compute_multiple_metrics_text(file, mapped)
     elif has_x:
         return compute_landscape_only_text(file, land)
     else:
-        return compute_class_only_text(file, clas)
+        return compute_class_only_text(file, mapped)
+
 
 
 
