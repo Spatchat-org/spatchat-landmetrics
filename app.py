@@ -147,6 +147,22 @@ def clear_raster():
     return None, gr.update(value=fig, visible=True)
 
 # --- Handlers ---
+def llm_fallback(history):
+    # If nothing else matches, ask the LLM to answer conversationally
+    prompt = [
+        {"role":"system","content":(
+            "You are Spatchat, a helpful assistant for landscape metrics. "
+            "Use rasterio for metadata and pylandstats for metrics."
+        )},
+        *history
+    ]
+    resp = client.chat.completions.create(
+        model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+        messages=prompt,
+        temperature=0.4
+    ).choices[0].message.content
+    return history + [{"role":"assistant","content":resp}], ""
+
 def answer_metadata(file, history):
     with rasterio.open(file.name) as src:
         crs     = src.crs
