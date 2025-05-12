@@ -228,9 +228,8 @@ def run_list_metrics(file):
     return list_metrics_text()
 
 def run_compute_metrics(file, raw_metrics, level):
-    # 1) normalize + map synonyms & reject unmapped codes
-    mapped = []
-    unknown = []
+    # 1) normalize & map synonyms, catch unknowns
+    mapped, unknown = [], []
     for m in raw_metrics:
         ml = m.lower()
         if ml in metric_definitions:
@@ -240,6 +239,7 @@ def run_compute_metrics(file, raw_metrics, level):
         else:
             unknown.append(m)
             continue
+        # drop metrics we can’t compute
         if metric_map.get(cand) is None:
             unknown.append(m)
         else:
@@ -247,27 +247,28 @@ def run_compute_metrics(file, raw_metrics, level):
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # 2) split into class‑only vs cross‑level
-    land = [c for c in mapped if c not in class_only]
-    clas = [c for c in mapped if c in class_only]
+    # 2) split into class‑only vs cross‑level buckets
+    is_cross = any(c in cross_level for c in mapped)
+    is_class = all(c in class_only for c in mapped)
 
-    # 3) honor an explicit "level" slot
+    # 3) EXPLICIT LEVEL always wins
     if level == "landscape":
-        return compute_landscape_only_text(file, land)
+        return compute_landscape_only_text(file, mapped)
     if level == "class":
-        return compute_class_only_text  (file, clas)
+        return compute_class_only_text(file, mapped)
     if level == "both":
         return compute_multiple_metrics_text(file, mapped)
 
-    # 4) no explicit level → infer defaults
-    # a) pure class‑only → class‑level table
-    if len(mapped) > 0 and all(c in class_only for c in mapped):
-        return compute_class_only_text(file, mapped)
-    # b) pure cross‑level → BOTH summary + class table
-    if len(mapped) > 0 and all(c in cross_level for c in mapped):
+    # 4) no explicit level → infer
+    if is_cross:
+        # any cross-level metric → show both
         return compute_multiple_metrics_text(file, mapped)
-    # c) mixture of class‑only & cross‑level → BOTH
-    return compute_multiple_metrics_text(file, mapped)
+    elif is_class:
+        # pure class-only → class table
+        return compute_class_only_text(file, mapped)
+    else:
+        # pure landscape‑only → landscape summary
+        return compute_landscape_only_text(file, mapped)
 
 
 
