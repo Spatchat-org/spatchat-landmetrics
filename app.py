@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import gradio as gr
 import rasterio
 import numpy as np
@@ -245,60 +246,61 @@ def compute_multiple_metrics(file, keys, history):
     
 # --- Main handler ---
 def analyze_raster(file, question, history):
-    hist = history + [{"role":"user","content":question}]
+    hist  = history + [{"role":"user","content":question}]
+    lower = question.lower()
 
-    # 1️⃣ Ask the LLM to parse out what the user wants in a structured way
+    # 1️⃣ LIST METRICS (always allowed)
+    if re.search(r"\b(list|available).*metrics\b", lower):
+        return list_metrics(hist)
+
+    # 2️⃣ NEED A FILE for everything else
+    if file is None:
+        return hist + [{"role":"assistant",
+                        "content":"Please upload a GeoTIFF before asking anything."}], ""
+
+    # 3️⃣ PARSE INTENTS via LLM
     parse = client.chat.completions.create(
         model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
         messages=[
             {"role":"system","content":(
-                "Parse the following user request into a JSON with keys:\n"
-                "  count_classes: true/false\n"
-                "  metadata: true/false\n"
-                "  metrics: [list of metric codes]\n"
-                "  level: one of ['landscape','class','both']\n"
-                "  all_metrics: true/false (if they want *all* at a given level)\n"
-                "If unsure, set fields conservatively and let assistant handle missing bits.\n"
-                "Output ONLY valid JSON."
+                "Parse the user request into JSON with these fields:\n"
+                "- count_classes: true/false\n"
+                "- metadata: true/false\n"
+                "- metrics: [list of metric codes]\n"
+                "- level: one of 'landscape','class','both'\n"
+                "- all_metrics: true/false\n"
+                "Output only valid JSON."
             )},
             {"role":"user","content":question}
         ],
         temperature=0.0
     ).choices[0].message.content
 
-    # 2️⃣ Safely load that JSON
     try:
         req = json.loads(parse)
     except json.JSONDecodeError:
-        # fallback to regex logic if parsing fails
         req = {}
 
-    # 3️⃣ If they asked for count or metadata, handle those first
+    # 4️⃣ HANDLE count_classes & metadata
     if req.get("count_classes"):
         return count_classes(file, hist)
     if req.get("metadata"):
         return answer_metadata(file, hist)
 
-    # 4️⃣ Ensure they’ve uploaded a file for any metric calculation
-    if file is None:
-        return hist + [{"role":"assistant",
-                        "content":"Please upload a GeoTIFF before asking anything."}], ""
-
-    # 5️⃣ Determine which metrics to compute
+    # 5️⃣ FIGURE OUT METRICS & LEVEL
     metrics = req.get("metrics", [])
-    # if they said “all_metrics” at a specific level:
-    if req.get("all_metrics") and req.get("level") == "landscape":
-        metrics = [m for m in metric_definitions if m not in class_only]
-    if req.get("all_metrics") and req.get("level") == "class":
-        metrics = list(class_only)
+    level   = req.get("level", "both")
+    if req.get("all_metrics"):
+        if level == "landscape":
+            metrics = [m for m in metric_definitions if m not in class_only]
+        elif level == "class":
+            metrics = list(class_only)
 
-    # 6️⃣ Route to the right computation
-    level = req.get("level", "both")
+    # 6️⃣ DISPATCH
     if level == "landscape":
         return compute_landscape_only(file, metrics, hist)
     if level == "class":
         return compute_class_only(file, metrics, hist)
-    # default when they want both or didn’t specify
     return compute_multiple_metrics(file, metrics, hist)
 
 def count_classes(file, history):
