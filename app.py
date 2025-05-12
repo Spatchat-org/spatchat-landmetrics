@@ -48,6 +48,11 @@ synonyms = {
     "te":           ["te", "total edge"],
 }
 
+reverse_synonyms = {}
+for code, syn_list in synonyms.items():
+    for syn in syn_list:
+        reverse_synonyms[syn.lower()] = code
+
 # --- Column mapping & helpers ---
 metric_map = {
     "pland":        "proportion_of_landscape",
@@ -279,15 +284,28 @@ def analyze_raster(file, user_msg, history):
         reply = run_count_classes(file)
     elif tool=="list_metrics":
         reply = run_list_metrics(file)
-    elif tool=="compute_metrics":
-        metrics = call.get("metrics",[])
-        level   = call.get("level","both")
-        # check known codes
-        unknown = [m for m in metrics if m not in metric_definitions]
-        if unknown:
-            reply = f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
+    elif tool == "compute_metrics":
+        raw_metrics = call.get("metrics", [])
+        level       = call.get("level", "both")
+
+        # 1️⃣ normalize + map synonyms → canonical codes
+        mapped   = []
+        unknowns = []
+        for m in raw_metrics:
+            ml = m.lower()
+            if ml in metric_definitions:
+                mapped.append(ml)
+            elif ml in reverse_synonyms:
+                mapped.append(reverse_synonyms[ml])
+            else:
+                unknowns.append(m)
+
+        # 2️⃣ if any still unknown, ask to clarify
+        if unknowns:
+            reply = f"Sorry, I don’t recognize: {', '.join(unknowns)}. Could you clarify?"
         else:
-            reply = run_compute_metrics(file, metrics, level)
+            # 3️⃣ compute with canonical codes
+            reply = run_compute_metrics(file, mapped, level)
     else:
         reply = "Sorry, I didn’t understand that. Could you clarify?"
 
@@ -301,19 +319,27 @@ with gr.Blocks(title="Spatchat") as iface:
     gr.HTML('<head><link rel="icon" href="logo1.png"></head>')
     gr.Image(value="logo_long1.png", type="filepath", show_label=False, show_download_button=False, show_share_button=False, elem_id="logo-img")
     gr.HTML("<style>#logo-img img{height:90px;margin:10px;border-radius:6px;}</style>")
-    gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant")
-    gr.HTML('''
-      <div style="margin:-10px 0 20px;">
-        <input id="shareLink" type="text" readonly
-               value="https://spatchat.org/browse/?room=landmetrics"
-               style="width:50%;padding:5px;border:1px solid #ccc;border-radius:4px;" />
-        <button onclick="navigator.clipboard.writeText(
-          document.getElementById('shareLink').value
-        )" style="padding:5px 10px;background:#007BFF;color:white;border:none;border-radius:4px;">
-          📋 Copy Share Link
-        </button>
+    gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant {landmetrics}")
+    gr.HTML("""
+    <div style="margin-top: -10px; margin-bottom: 15px;">
+      <input type="text" value="https://spatchat.org/browse/?room=landmetrics" id="shareLink" readonly style="width: 50%; padding: 5px; background-color: #f8f8f8; color: #222; font-weight: 500; border: 1px solid #ccc; border-radius: 4px;">
+      <button onclick="navigator.clipboard.writeText(document.getElementById('shareLink').value)" style="padding: 5px 10px; background-color: #007BFF; color: white; border: none; border-radius: 4px; cursor: pointer;">
+        📋 Copy Share Link
+      </button>
+      <div style="margin-top: 10px; font-size: 14px;">
+        <b>Share:</b>
+        <a href="https://twitter.com/intent/tweet?text=Checkout+Spatchat!&url=https://spatchat.org/browse/?room=landmetrics" target="_blank">🐦 Twitter</a> |
+        <a href="https://www.facebook.com/sharer/sharer.php?u=https://spatchat.org/browse/?room=landmetrics" target="_blank">📘 Facebook</a>
       </div>
-    ''')
+    </div>
+    """)
+    gr.Markdown("""
+                <div style="font-size: 14px;">
+                © 2025 Ho Yi Wan & Logan Hysen. All rights reserved.<br>
+                If you use Spatchat in research, please cite:<br>
+                <b>Wan, H.Y.</b> & <b>Hysen, L.</b> (2025). <i>Spatchat: Landscape Metrics.</i>
+                </div>
+                """)
     
     with gr.Row():
         with gr.Column(scale=1):
