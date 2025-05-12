@@ -176,26 +176,52 @@ def compute_landscape_only(file, keys, history):
     return history + [{"role": "assistant", "content": "\n\n".join(parts)}], ""
 
 def compute_class_only(file, keys, history):
-    ls = Landscape(file.name, nodata=0, res=(1,1))
+    """
+    Compute *only* the class‐level metrics for the given keys.
+    Returns (new_history, ""), where new_history is the chat history list.
+    """
+    ls   = _build_landscape(file)
     cols = [col_map[k] for k in keys]
-    df = ls.compute_class_metrics_df(metrics=cols).rename_axis("code").reset_index()
-    df["class_name"] = df["code"].astype(int).astype(str).rjust(0, "Class ")
-    table = df[["class_name"] + cols].to_markdown(index=False)
-    return history + [{"role": "assistant", "content": f"**Class metrics:**\n{table}"}], ""
+    # get a DataFrame of class‐level metrics
+    df   = (
+        ls
+        .compute_class_metrics_df(metrics=cols)
+        .rename_axis("code")
+        .reset_index()
+    )
+    # build friendly class names
+    df["class_name"] = df["code"].astype(int).apply(lambda c: f"Class {c}")
+
+    # reorder into [class_name, metric1, metric2, ...]
+    out_cols = ["class_name"] + cols
+    tbl      = df[out_cols].to_markdown(index=False)
+
+    content  = f"**Class-level metrics:**\n{tbl}"
+    return history + [{"role":"assistant","content":content}], ""
+
 
 def compute_multiple_metrics(file, keys, history):
-    # 1️⃣ Split into what belongs at landscape vs. class levels
+    """
+    Compute both landscape- and class-level metrics for the given keys.
+    Landscape-level is only run on keys *not* in class_only, then
+    class-level is run on *all* keys.
+    """
+    # split your keys
     landscape_keys = [k for k in keys if k not in class_only]
     class_keys     = keys
 
-    # 2️⃣ Compute the landscape­-level metrics only on landscape_keys
-    hl, _ = compute_landscape_only(file, landscape_keys, history)
+    # 1️⃣ run landscape-only on the filtered set (if any)
+    chat, _ = (
+        compute_landscape_only(file, landscape_keys, history)
+        if landscape_keys
+        else (history, "")
+    )
 
-    # 3️⃣ Compute the class­-level metrics on all requested keys
-    hc, _ = compute_class_only(file, class_keys, hl)
+    # 2️⃣ run class-only on the full set, appending to the same chat
+    chat, _ = compute_class_only(file, class_keys, chat)
 
-    # 4️⃣ Return the combined chat history
-    return hc, ""
+    return chat, ""
+
 
 def llm_fallback(history):
     resp = client.chat.completions.create(
