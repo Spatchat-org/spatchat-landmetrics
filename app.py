@@ -46,7 +46,6 @@ synonyms = {
     "pd":           ["pd", "patch density"],
     "lpi":          ["lpi", "largest patch"],
     "te":           ["te", "total edge", "total_edge"],
-    # add more as desired...
 }
 
 # --- Map our codes to actual DataFrame column names ---
@@ -95,12 +94,13 @@ class_only = {
     "enn", "core", "nca", "cai",
 }
 
-# --- Raster preview & clear ---
+# Metrics available at both landscape & class levels:
+cross_level = ["np", "pd", "lpi", "te", "edge_density"]
 
+# --- Raster preview & clear ---
 def no_raster_fig():
     fig, ax = plt.subplots(figsize=(5, 5))
-    ax.text(0.5, 0.5, "🗂️ No raster loaded.", ha='center', va='center',
-            color='gray', fontsize=14)
+    ax.text(0.5, 0.5, "🗂️ No raster loaded.", ha='center', va='center', color='gray', fontsize=14)
     ax.set_title("Raster Preview", color='dimgray')
     ax.axis('off')
     return fig
@@ -166,41 +166,32 @@ def answer_metadata(file, history):
     ])
     return history + [{"role":"assistant","content":text}], ""
 
+# --- Metrics listing ---
 def list_metrics(history):
-    # 1️⃣ Define which metrics span both Landscape & Class levels
-    cross_level = ["np", "pd", "lpi", "te", "edge_density"]
-    
     lines = []
     lines.append("**Cross‑level metrics (Landscape & Class):**")
     for k in cross_level:
         name, _ = metric_definitions[k]
         lines.append(f"- {name} (`{k}`)")
     lines.append("")
+    lines.append("**Landscape‑only metrics:**")
+    for k in helper_methods:
+        name, _ = metric_definitions[k]
+        lines.append(f"- {name} (`{k}`)")
+    lines.append("")
+    lines.append("**Class‑only metrics:**")
+    for k in class_only:
+        name, _ = metric_definitions[k]
+        lines.append(f"- {name} (`{k}`)")
+    content = "\n".join(lines)
+    return history + [{"role": "assistant", "content": content}], ""
 
-    # 2️⃣ Rest of your grouped listing
-    groups = {
-        "Landscape‑only": ["contag","shdi","shei","mesh","lsi","tca"],
-        "Class‑only":     ["pland"],
-        "Patch‑only":     ["area","perim","para","shape","frac","enn","core","nca","cai"]
-    }
-    for lvl, keys in groups.items():
-        lines.append(f"**{lvl} metrics:**")
-        for k in keys:
-            name, _ = metric_definitions[k]
-            lines.append(f"- {name} (`{k}`)")
-        lines.append("")
-
-    return history + [{"role":"assistant","content":"\n".join(lines).strip()}], ""
-
-def compute_metric(file, key, history):
-
-    # 1️⃣ Read raster + metadata
+# --- Core compute helpers ---
+def _build_landscape(file):
     with rasterio.open(file.name) as src:
         raw = src.read(1)
         x_res, y_res = src.res
         nodata = src.nodata or 0
-
-    # 2️⃣ String-to-int mapping if needed
     if raw.dtype.kind in ("U", "S", "O"):
         data_str = raw.astype(str)
         uniq = np.unique(data_str[data_str!=""])
@@ -211,116 +202,86 @@ def compute_metric(file, key, history):
         ls = Landscape(arr, res=(x_res, y_res), nodata=0)
     else:
         ls = Landscape(file.name, nodata=nodata, res=(x_res, y_res))
+    return ls
 
-    # 3️⃣ Friendly metric name & DataFrame column
-    metric_name, _ = metric_definitions[key]
-    col = col_map.get(key, key)
 
-    # 4️⃣ Landscape-level
-    if key == "np":
-        df_tmp = ls.compute_class_metrics_df(metrics=["number_of_patches"])
-        val = int(df_tmp["number_of_patches"].sum())
-        land_part = f"**Landscape-level {metric_name}:** {val}"
-    elif key in helper_methods:
-        val = getattr(ls, helper_methods[key])()
-        land_part = f"**Landscape-level {metric_name}:** {val:.4f}"
-    elif key in class_only:
-        land_part = ""
-    else:
-        df_land = ls.compute_landscape_metrics_df(metrics=[col])
-        val = df_land[col].iloc[0]
-        land_part = f"**Landscape-level {metric_name}:** {val:.4f}"
-
-    # 5️⃣ Class-level table
-    df2 = ls.compute_class_metrics_df(metrics=[col]).rename_axis("code").reset_index()
-    df2["class_name"] = df2["code"].map(lambda c: f"Class {int(c)}")
-    tbl = df2[["class_name", col]].to_markdown(index=False)
-    content = land_part + f"\n**Class-level {metric_name}:**\n{tbl}"
-    return history + [{"role":"assistant","content":content}]
-
-def compute_multiple_metrics(file, keys, history):
-    # 1️⃣ Read raster + metadata
-    with rasterio.open(file.name) as src:
-        raw = src.read(1)
-        x_res, y_res = src.res
-        nodata = src.nodata or 0
-
-    # 2️⃣ String-to-int mapping if needed
-    if raw.dtype.kind in ("U","S","O"):
-        data_str = raw.astype(str)
-        uniq = np.unique(data_str[data_str!=""])
-        name2code = {nm: i+1 for i, nm in enumerate(uniq)}
-        arr = np.zeros_like(raw, dtype=int)
-        for nm, code in name2code.items():
-            arr[data_str==nm] = code
-        ls = Landscape(arr, res=(x_res, y_res), nodata=0)
-        code2name = {v: k for k, v in name2code.items()}
-    else:
-        ls = Landscape(file.name, nodata=nodata, res=(x_res, y_res))
-        code2name = None
-
-    # 3️⃣ Landscape-level summaries
-    land_parts = []
+def compute_landscape_only(file, keys, history):
+    ls = _build_landscape(file)
+    parts = []
     for key in keys:
-        metric_name, _ = metric_definitions[key]
-        col = col_map[key]
+        name, _ = metric_definitions[key]
         if key == "np":
-            df_tmp = ls.compute_class_metrics_df(metrics=["number_of_patches"])
-            val = int(df_tmp["number_of_patches"].sum())
-            land_parts.append(f"**Landscape-level {metric_name}:** {val}")
+            df = ls.compute_class_metrics_df(metrics=["number_of_patches"])
+            val = int(df["number_of_patches"].sum())
         elif key in helper_methods:
             val = getattr(ls, helper_methods[key])()
-            land_parts.append(f"**Landscape-level {metric_name}:** {val:.4f}")
-        elif key not in class_only:
-            df_land = ls.compute_landscape_metrics_df(metrics=[col])
-            val = df_land[col].iloc[0]
-            land_parts.append(f"**Landscape-level {metric_name}:** {val:.4f}")
-    land_text = "\n\n".join(land_parts) + "\n\n" if land_parts else ""
+        else:
+            df = ls.compute_landscape_metrics_df(metrics=[col_map[key]])
+            val = df[col_map[key]].iloc[0]
+        parts.append(f"**{name} ({key.upper()}):** {val:.4f}" if isinstance(val, float) else f"**{name} ({key.upper()}):** {val}")
+    content = "\n\n".join(parts)
+    return history + [{"role": "assistant", "content": content}], ""
 
-    # 4️⃣ Class-level table
+
+def compute_class_only(file, keys, history):
+    ls = _build_landscape(file)
     cols = [col_map[k] for k in keys]
-    df2 = ls.compute_class_metrics_df(metrics=cols).rename_axis("code").reset_index()
-    if code2name:
-        df2["class_name"] = df2["code"].map(lambda c: f"{c}: {code2name.get(c,'Unknown')}")
-    else:
-        df2["class_name"] = df2["code"].map(lambda c: f"Class {int(c)}")
-    df2 = df2[["class_name"] + cols]
-    tbl = df2.to_markdown(index=False)
+    df = ls.compute_class_metrics_df(metrics=cols).rename_axis("code").reset_index()
+    df["class_name"] = df["code"].map(lambda c: f"Class {int(c)}")
+    tbl = df[["class_name"] + cols].to_markdown(index=False)
+    content = f"**Class-level metrics:**\n{tbl}"
+    return history + [{"role": "assistant", "content": content}], ""
 
-    content = land_text + "**Class-level metrics:**\n" + tbl
-    return history + [{"role":"assistant","content":content}]
 
+def compute_multiple_metrics(file, keys, history):
+    # fallback: both levels
+    hl, _ = compute_landscape_only(file, keys, history)
+    hc, _ = compute_class_only(file, keys, history)
+    land_msg = hl[-1]
+    class_msg = hc[-1]
+    return history + [land_msg, class_msg], ""
 
 def analyze_raster(file, question, history):
-    hist = history + [{"role":"user","content":question}]
+    hist = history + [{"role": "user", "content": question}]
     lower = question.lower()
 
-    if file is None:
-        return hist + [{"role":"assistant","content":
-            "Please upload a GeoTIFF before asking anything."
-        }], ""
-
-    if "how many classes" in lower or re.search(r"\bnum(ber)? of classes\b", lower):
-        return count_classes(file, hist)
-    if re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower):
-        return answer_metadata(file, hist)
-    if re.search(r"\b(what|which|list|available).*metrics\b", lower):
+    # always allow "list metrics"
+    if re.search(r"\b(list|available).*metrics\b", lower):
         return list_metrics(hist)
 
-    # gather all metric keys mentioned
+    # file required for calculations
+    if file is None:
+        return hist + [{"role": "assistant", "content": "Please upload a GeoTIFF before asking anything."}], ""
+
+    # detect level qualifiers
+    is_land = bool(re.search(r"\blandscape[- ]level\b", lower))
+    is_class = bool(re.search(r"\bclass[- ]level\b", lower))
+
+    # gather metric keys
     found = []
-    for code, (full, _) in metric_definitions.items():
-        for syn in synonyms.get(code, [code, full.lower()]):
+    for code, (fullname, _) in metric_definitions.items():
+        for syn in synonyms.get(code, [code, fullname.lower()]):
             if re.search(rf"\b{re.escape(syn)}\b", lower) and code not in found:
                 found.append(code)
 
-    if len(found) > 1:
-        return compute_multiple_metrics(file, found, hist), ""
-    elif len(found) == 1:
-        # make sure to return (history_list, question_reset)
-        return compute_metric(file, found[0], hist), ""
+    if not found:
+        return llm_fallback(hist)
 
-    return llm_fallback(hist)
+    # branch on number and level
+    if len(found) > 1:
+        if is_land:
+            return compute_landscape_only(file, found, hist)
+        if is_class:
+            return compute_class_only(file, found, hist)
+        return compute_multiple_metrics(file, found, hist)
+    else:
+        key = found[0]
+        if is_land:
+            return compute_landscape_only(file, [key], hist)
+        if is_class:
+            return compute_class_only(file, [key], hist)
+        # default: show both levels for that one metric
+        return compute_multiple_metrics(file, [key], hist)
 
 def count_classes(file, history):
     with rasterio.open(file.name) as src:
