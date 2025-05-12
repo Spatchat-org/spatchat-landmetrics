@@ -238,25 +238,28 @@ def run_compute_metrics(file, raw_metrics, level):
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # 2) enforce “both” whenever any cross‑level metric is present
-    if any(c in cross_level for c in mapped):
-        eff = "both"
-    else:
-        eff = level  # respect the LLM’s level when it’s not cross‑level
-
-    # 3) dispatch
-    if eff == "landscape":
-        # only true landscape codes
+    # 2) dispatch based on explicit level or single/multi metrics
+    #  a) explicit landscape request
+    if level == "landscape":
         land = [c for c in mapped if c not in class_only]
         return compute_landscape_only_text(file, land)
 
-    if eff == "class":
-        # only class‑only codes
-        clas = [c for c in mapped if c in class_only]
-        return compute_class_only_text(file, clas)
+    #  b) explicit class request
+    if level == "class":
+        return compute_class_only_text(file, mapped)
 
-    # both
-    return compute_multiple_metrics_text(file, mapped)
+    #  c) no explicit level: single metric?
+    if len(mapped) == 1:
+        key = mapped[0]
+        if key in cross_level:
+            # single cross‑level → landscape summary
+            return compute_landscape_only_text(file, [key])
+        else:
+            # single class‑only → class table
+            return compute_class_only_text(file, [key])
+
+    #  d) multi‑metric default → class‑level table
+    return compute_class_only_text(file, mapped)
 
 
 # ───── System & Fallback Prompts ────────────────────────────────────────
