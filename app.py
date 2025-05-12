@@ -78,7 +78,7 @@ helper_methods = {
     "pd":           "patch_density",
     "edge_density": "edge_density",
     "lsi":          "landscape_shape_index",
-    "contag":       "contagion_index",
+    "contag":       "contiguity_index",
     "shdi":         "shannon_diversity_index",
     "shei":         "shannon_evenness_index",
     "mesh":         "effective_mesh_size",
@@ -251,48 +251,44 @@ def analyze_raster(file, question, history):
     if re.search(r"\b(list|available).*metrics\b", lower):
         return list_metrics(hist)
 
-    # 2️⃣ Must have a file for anything else
+    # 2️⃣ Must have a file for everything else
     if file is None:
-        return hist + [{"role": "assistant",
-                        "content": "Please upload a GeoTIFF before asking anything."}], ""
+        return hist + [{"role":"assistant","content":
+                        "Please upload a GeoTIFF before asking anything."}], ""
 
-    # 3️⃣ Handle multi‑question combos first
+    # 3️⃣ Multi‑intent: count classes + metadata in one go
     want_count = bool(re.search(r"\bnum(ber)? of classes\b", lower))
     want_meta  = bool(re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower))
-    if want_count and want_meta:
-        # run both handlers in sequence
-        h1, _ = count_classes(file, hist)
-        h2, _ = answer_metadata(file, h1)
-        return h2, ""
+    if want_count or want_meta:
+        chat = hist
+        if want_count:
+            chat, _ = count_classes(file, chat)
+        if want_meta:
+            chat, _ = answer_metadata(file, chat)
+        return chat, ""
 
-    # 4️⃣ Individual shortcuts
-    if want_count:
-        return count_classes(file, hist)
-    if want_meta:
-        return answer_metadata(file, hist)
-
-    # 5️⃣ Detect level qualifiers
+    # 4️⃣ Detect explicit level qualifiers
     is_land  = bool(re.search(r"\blandscape[- ]level\b", lower))
     is_class = bool(re.search(r"\bclass[- ]level\b",     lower))
 
-    # 6️⃣ "all … metrics" shortcuts
+    # 5️⃣ "all ... metrics" shortcuts
     if is_land and "all" in lower:
         found = [c for c in metric_definitions if c not in class_only]
     elif is_class and "all" in lower:
         found = list(class_only)
     else:
-        # 7️⃣ Otherwise pick out explicit metric names
+        # 6️⃣ Otherwise pick out explicit metric names
         found = []
         for code, (fullname, _) in metric_definitions.items():
             for syn in synonyms.get(code, [code, fullname.lower()]):
                 if re.search(rf"\b{re.escape(syn)}\b", lower) and code not in found:
                     found.append(code)
 
-    # 8️⃣ Nothing matched?  Fallback to LLM
+    # 7️⃣ Nothing matched?  Fallback to the LLM
     if not found:
         return llm_fallback(hist)
 
-    # 9️⃣ Dispatch to helpers
+    # 8️⃣ Dispatch based on how many and which level
     if len(found) > 1:
         if is_land:
             return compute_landscape_only(file, found, hist)
@@ -306,6 +302,7 @@ def analyze_raster(file, question, history):
         if is_class:
             return compute_class_only(file, [key], hist)
         return compute_multiple_metrics(file, [key], hist)
+
 
 def count_classes(file, history):
     with rasterio.open(file.name) as src:
