@@ -81,11 +81,11 @@ metric_map = {
 helper_methods = {k:v for k,v in metric_map.items() if v}
 col_map = helper_methods.copy()
 class_only = {"pland","area","perim","para","shape","frac","enn","core","nca","cai"}
+cross_level = ["np","pd","lpi","te","edge_density"]
 landscape_only = [
     k for k in helper_methods
     if k not in class_only and k not in cross_level
 ]
-cross_level = ["np","pd","lpi","te","edge_density"]
 
 # --- Raster preview helpers (unchanged) ---
 def no_raster_fig():
