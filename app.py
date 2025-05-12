@@ -218,7 +218,7 @@ def run_list_metrics(file):
     return list_metrics_text()
 
 def run_compute_metrics(file, raw_metrics, level):
-    # 1) normalize + map synonyms & reject any None‑mapped code
+    # 1) normalize + map synonyms & reject unmapped codes
     mapped = []
     unknown = []
     for m in raw_metrics:
@@ -230,35 +230,38 @@ def run_compute_metrics(file, raw_metrics, level):
         else:
             unknown.append(m)
             continue
+
+        # drop those with no mapping in metric_map (e.g. 'shei')
         if metric_map.get(cand) is None:
             unknown.append(m)
         else:
             mapped.append(cand)
+
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # 2) split into landscape vs class lists
-    land = [c for c in mapped if c not in class_only]
-    clas = [c for c in mapped if c in class_only]
+    # split into class‑only vs cross‑level
+    land  = [c for c in mapped if c not in class_only]
+    clas  = [c for c in mapped if c in class_only]
 
-    # 3) honor explicit level requests
+    # 2) honor explicit level
     if level == "landscape":
         return compute_landscape_only_text(file, land)
     if level == "class":
-        return compute_class_only_text(file, mapped)
+        return compute_class_only_text   (file, mapped)
     if level == "both":
         return compute_multiple_metrics_text(file, mapped)
 
-    # 4) infer from the mix of requested codes
-    has_x = bool(land)
-    has_c = bool(clas)
-
-    if has_x and has_c:
+    # 3) no explicit level → infer defaults
+    #  a) all class‑only → class table
+    if all(c in class_only    for c in mapped):
+        return compute_class_only_text   (file, mapped)
+    #  b) all cross‑level → BOTH landscape + class
+    if all(c in cross_level    for c in mapped):
         return compute_multiple_metrics_text(file, mapped)
-    elif has_x:
-        return compute_landscape_only_text(file, land)
-    else:
-        return compute_class_only_text(file, mapped)
+    #  c) mixture → BOTH
+    return compute_multiple_metrics_text(file, mapped)
+
 
 
 
