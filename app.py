@@ -184,9 +184,18 @@ def compute_class_only(file, keys, history):
     return history + [{"role": "assistant", "content": f"**Class metrics:**\n{table}"}], ""
 
 def compute_multiple_metrics(file, keys, history):
-    hl, _ = compute_landscape_only(file, keys, history)
-    hc, _ = compute_class_only(file, keys, history)
-    return history + [hl[-1], hc[-1]], ""
+    # 1️⃣ Split into what belongs at landscape vs. class levels
+    landscape_keys = [k for k in keys if k not in class_only]
+    class_keys     = keys
+
+    # 2️⃣ Compute the landscape­-level metrics only on landscape_keys
+    hl, _ = compute_landscape_only(file, landscape_keys, history)
+
+    # 3️⃣ Compute the class­-level metrics on all requested keys
+    hc, _ = compute_class_only(file, class_keys, hl)
+
+    # 4️⃣ Return the combined chat history
+    return hc, ""
 
 def llm_fallback(history):
     resp = client.chat.completions.create(
