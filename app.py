@@ -293,6 +293,8 @@ If you can’t map a request to one of your tools, ask the user to clarify.
 
 def analyze_raster(file, user_msg, history):
     hist = history + [{"role":"user","content":user_msg}]
+    lower = user_msg.lower()
+
     # 1️⃣ Ensure there's a raster
     if file is None:
         hist.append({"role":"assistant","content":
