@@ -233,7 +233,7 @@ def run_list_metrics(file):
     return list_metrics_text()
 
 def run_compute_metrics(file, raw_metrics, level):
-    # 1) normalize & map, collect unknowns
+    # 1) normalize & map synonyms, catch unknowns
     mapped, unknown = [], []
     for m in raw_metrics:
         ml = m.lower()
@@ -242,34 +242,34 @@ def run_compute_metrics(file, raw_metrics, level):
         elif ml in reverse_synonyms:
             cand = reverse_synonyms[ml]
         else:
-            unknown.append(m); continue
-
+            unknown.append(m)
+            continue
         if metric_map.get(cand) is None:
             unknown.append(m)
         else:
             mapped.append(cand)
-
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # 2) honor explicit level
-    if level == "landscape":
-        return compute_landscape_only_text(file, mapped)
+    # split into cross‐level vs class‐only
+    land  = [c for c in mapped if c not in class_only]
+    clas  = [c for c in mapped if c in class_only]
+    any_cross = bool(set(mapped) & set(cross_level))
+
+    # 2) honor explicit “class level” request
     if level == "class":
         return compute_class_only_text(file, mapped)
-    if level == "both":
-        return compute_multiple_metrics_text(file, mapped)
 
-    # 3) infer level:
-    #    a) all mapped in class_only → class‑only
-    if all(c in class_only for c in mapped):
-        return compute_class_only_text(file, mapped)
-    #    b) all mapped in cross_level → both
-    if all(c in cross_level for c in mapped):
-        return compute_multiple_metrics_text(file, mapped)
-    #    c) mixture → both
-    return compute_multiple_metrics_text(file, mapped)
+    # 3) honor explicit “landscape level” request
+    if level == "landscape":
+        return compute_landscape_only_text(file, land)
 
+    # 4) otherwise infer:
+    #    – if any cross‐level metric requested → show both
+    if any_cross:
+        return compute_multiple_metrics_text(file, mapped)
+    #    – else pure class‐only → class table
+    return compute_class_only_text(file, mapped)
 
 
 # ───── System & Fallback Prompts ────────────────────────────────────────
