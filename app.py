@@ -295,6 +295,7 @@ def analyze_raster(file, question, history):
     return compute_multiple_metrics(file, metrics, hist)
 
 # --- UI layout & launch ---
+# --- UI layout & launch ---
 initial_history = [
     {"role":"assistant","content":
      "👋 Hi! I’m Spatchat. Upload a GeoTIFF to begin—then ask for CRS, resolution, extent, or any landscape metric."}
@@ -302,9 +303,14 @@ initial_history = [
 
 with gr.Blocks(title="Spatchat") as iface:
     gr.HTML('<head><link rel="icon" href="file=logo1.png"></head>')
-    gr.Image(value="logo/logo_long1.png", type="filepath",
-             show_label=False, show_download_button=False,
-             show_share_button=False, elem_id="logo-img")
+    gr.Image(
+        value="logo/logo_long1.png",
+        type="filepath",
+        show_label=False,
+        show_download_button=False,
+        show_share_button=False,
+        elem_id="logo-img",
+    )
     gr.HTML("<style>#logo-img img{height:90px;margin:10px;border-radius:6px;}</style>")
     gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant")
     gr.HTML('''
@@ -318,20 +324,25 @@ with gr.Blocks(title="Spatchat") as iface:
           📋 Copy Share Link
         </button>
       </div>
-    '''
-)
+    ''')
+
     with gr.Row():
         with gr.Column(scale=1):
             file_input          = gr.File(label="Upload GeoTIFF", type="filepath")
             raster_output       = gr.Plot(label="Raster Preview")
             clear_raster_button = gr.Button("Clear Raster")
         with gr.Column(scale=1):
-            chatbot        = gr.Chatbot(value=initial_history, type="messages",
-                                       label="Spatchat Dialog")
-            question_input = gr.Textbox(placeholder="e.g. calculate edge density",  
-                                        lines=1)
+            chatbot        = gr.Chatbot(
+                value=initial_history,
+                type="messages",
+                label="Spatchat Dialog"
+            )
+            question_input = gr.Textbox(
+                placeholder="e.g. calculate edge density",
+                lines=1
+            )
             clear_button   = gr.Button("Clear Chat")
-)
+
     file_input.change(preview_raster, inputs=file_input, outputs=raster_output)
     clear_raster_button.click(clear_raster, inputs=None,
                               outputs=[file_input, raster_output])
@@ -341,3 +352,4 @@ with gr.Blocks(title="Spatchat") as iface:
     clear_button.click(lambda: initial_history, outputs=chatbot)
 
 iface.launch()
+
