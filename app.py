@@ -218,7 +218,7 @@ def run_list_metrics(file):
     return list_metrics_text()
 
 def run_compute_metrics(file, raw_metrics, level):
-    # 1) Normalize + map synonyms → canonical codes, collect unknowns
+    # 1) normalize + map synonyms & reject None‑mapped
     mapped, unknown = [], []
     for m in raw_metrics:
         ml = m.lower()
@@ -227,37 +227,35 @@ def run_compute_metrics(file, raw_metrics, level):
         elif ml in reverse_synonyms:
             cand = reverse_synonyms[ml]
         else:
-            unknown.append(m)
-            continue
-
+            unknown.append(m); continue
         if metric_map.get(cand) is None:
             unknown.append(m)
         else:
             mapped.append(cand)
-
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # 2) Split into cross‑level vs class‑only
+    # 2) split into cross‑level vs class‑only
     land = [c for c in mapped if c in cross_level]
     clas = [c for c in mapped if c in class_only]
 
-    # 3) Honor an explicit “level:” flag from the LLM
+    # --- New bit: if they only asked cross‑level, also do those at class level ---
+    if land and not clas:
+        clas = land.copy()
+
+    # 3) honor explicit level flags
     if level == "landscape":
-        # user wants summary only
         return compute_landscape_only_text(file, land or mapped)
     if level == "class":
-        # user wants class table only
         return compute_class_only_text(file, clas or mapped)
     if level == "both":
-        # user explicitly asked for both
         return compute_multiple_metrics_text(file, mapped)
 
-    # 4) Default inference: if *any* cross‑level metric is present → BOTH
+    # 4) infer: mixed → both; only cross‑level (now with clas populated) → both; only class → class
+    if land and clas:
+        return compute_multiple_metrics_text(file, mapped)
     if land:
         return compute_multiple_metrics_text(file, mapped)
-
-    # 5) Otherwise pure class‑only
     return compute_class_only_text(file, mapped)
 
 
