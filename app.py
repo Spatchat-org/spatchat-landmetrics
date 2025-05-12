@@ -249,27 +249,27 @@ def analyze_raster(file, question, history):
     hist  = history + [{"role":"user","content":question}]
     lower = question.lower()
 
-    # 1️⃣ LIST METRICS (always allowed)
+    # 1️⃣ LIST METRICS always allowed
     if re.search(r"\b(list|available).*metrics\b", lower):
         return list_metrics(hist)
 
-    # 2️⃣ NEED A FILE for everything else
+    # 2️⃣ FILE REQUIRED for anything else
     if file is None:
-        return hist + [{"role":"assistant",
-                        "content":"Please upload a GeoTIFF before asking anything."}], ""
+        return hist + [{"role":"assistant","content":
+                        "Please upload a GeoTIFF before asking anything."}], ""
 
     # 3️⃣ PARSE INTENTS via LLM
     parse = client.chat.completions.create(
         model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
         messages=[
             {"role":"system","content":(
-                "Parse the user request into JSON with these fields:\n"
-                "- count_classes: true/false\n"
-                "- metadata: true/false\n"
-                "- metrics: [list of metric codes]\n"
-                "- level: one of 'landscape','class','both'\n"
-                "- all_metrics: true/false\n"
-                "Output only valid JSON."
+                "Parse the user request into JSON with fields:\n"
+                "- count_classes (bool)\n"
+                "- metadata (bool)\n"
+                "- metrics (list of metric codes)\n"
+                "- level: 'landscape','class', or 'both'\n"
+                "- all_metrics (bool)\n"
+                "Return ONLY valid JSON."
             )},
             {"role":"user","content":question}
         ],
@@ -288,15 +288,22 @@ def analyze_raster(file, question, history):
         return answer_metadata(file, hist)
 
     # 5️⃣ FIGURE OUT METRICS & LEVEL
-    metrics = req.get("metrics", [])
-    level   = req.get("level", "both")
-    if req.get("all_metrics"):
+    metrics    = req.get("metrics", [])
+    level      = req.get("level", "both")
+    all_m      = req.get("all_metrics", False)
+
+    # 6️⃣ SHORT‑CIRCUIT if no metrics requested
+    if not (metrics or all_m):
+        return llm_fallback(hist)
+
+    # 7️⃣ EXPAND "all_metrics"
+    if all_m:
         if level == "landscape":
             metrics = [m for m in metric_definitions if m not in class_only]
         elif level == "class":
             metrics = list(class_only)
 
-    # 6️⃣ DISPATCH
+    # 8️⃣ DISPATCH
     if level == "landscape":
         return compute_landscape_only(file, metrics, hist)
     if level == "class":
