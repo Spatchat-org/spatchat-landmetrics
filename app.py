@@ -81,6 +81,10 @@ metric_map = {
 helper_methods = {k:v for k,v in metric_map.items() if v}
 col_map = helper_methods.copy()
 class_only = {"pland","area","perim","para","shape","frac","enn","core","nca","cai"}
+landscape_only = [
+    k for k in helper_methods
+    if k not in class_only and k not in cross_level
+]
 cross_level = ["np","pd","lpi","te","edge_density"]
 
 # --- Raster preview helpers (unchanged) ---
@@ -195,15 +199,14 @@ def compute_class_only_text(file, keys):
 
 def compute_multiple_metrics_text(file, keys):
     """
-    For any requested metrics (landscape‐only, cross‐level or class‐only),
-    always show the landscape summary for non‐class‐only metrics,
-    and always show the class‐level table for ALL metrics (including cross‐level).
+    Show:
+      1) landscape summary for any key in (cross_level + landscape_only)
+      2) class-level table for all requested keys
     """
-    # 1) Landscape summary for anything that isn’t purely class‐only
-    land_keys  = [c for c in keys if c not in class_only]
-
-    # 2) Class‐level breakdown for everything
-    class_keys = keys
+    # which keys go to the landscape summary?
+    land_keys = [k for k in keys if k in cross_level or k in landscape_only]
+    # which keys go to the class table?
+    class_keys = keys  # always show all of them per-class
 
     parts = []
     if land_keys:
@@ -212,8 +215,6 @@ def compute_multiple_metrics_text(file, keys):
         parts.append(compute_class_only_text(file, class_keys))
 
     return "\n\n".join(parts)
-
-
 
 # ───── Your “tools” ─────────────────────────────────────────────────────
 
@@ -240,7 +241,6 @@ def run_compute_metrics(file, raw_metrics, level):
             unknown.append(m)
             continue
 
-        # drop those with no mapping in metric_map (e.g. 'shei')
         if metric_map.get(cand) is None:
             unknown.append(m)
         else:
@@ -249,27 +249,28 @@ def run_compute_metrics(file, raw_metrics, level):
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # split into class‑only vs cross‑level
-    land  = [c for c in mapped if c not in class_only]
-    clas  = [c for c in mapped if c in class_only]
+    # 2) split into the three buckets
+    land_only_keys  = [c for c in mapped if c in landscape_only]
+    cross_keys      = [c for c in mapped if c in cross_level]
+    class_only_keys = [c for c in mapped if c in class_only]
 
-    # 2) honor explicit level
+    # 3) honor explicit levels
     if level == "landscape":
-        return compute_landscape_only_text(file, land)
+        return compute_landscape_only_text(file, cross_keys + land_only_keys)
     if level == "class":
-        return compute_class_only_text   (file, mapped)
+        return compute_class_only_text(file, mapped)
     if level == "both":
         return compute_multiple_metrics_text(file, mapped)
 
-    # 3) no explicit level → infer defaults
-    #  a) all class‑only → class table
-    if all(c in class_only    for c in mapped):
-        return compute_class_only_text   (file, mapped)
-    #  b) all cross‑level → BOTH landscape + class
-    if all(c in cross_level    for c in mapped):
+    # 4) infer if no explicit level
+    # a) pure class-only → class table
+    if mapped and all(c in class_only for c in mapped):
+        return compute_class_only_text(file, mapped)
+    # b) any cross-level requested → both
+    if cross_keys:
         return compute_multiple_metrics_text(file, mapped)
-    #  c) mixture → BOTH
-    return compute_multiple_metrics_text(file, mapped)
+    # c) otherwise (must be pure landscape-only) → landscape summary
+    return compute_landscape_only_text(file, land_only_keys)
 
 
 # ───── System & Fallback Prompts ────────────────────────────────────────
