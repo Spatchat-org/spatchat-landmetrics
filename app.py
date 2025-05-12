@@ -49,44 +49,36 @@ synonyms = {
 }
 
 # --- Column mapping ---
-col_map = {
-    "pland": "proportion_of_landscape",
-    "np": "number_of_patches",
-    "pd": "patch_density",
-    "lpi": "largest_patch_index",
-    "te": "total_edge",
-    "edge_density": "edge_density",
-    "lsi": "landscape_shape_index",
-    "tca": "total_core_area",
-    "mesh": "effective_mesh_size",
-    "contag": "contagion_index",
-    "shdi": "shannon_diversity_index",
-    "shei": "shannon_evenness_index",
-    "area": "total_area",
-    "perim": "total_perimeter",
-    "para": "perimeter_area_ratio",
-    "shape": "shape_index",
-    "frac": "fractal_dimension_index",
-    "enn": "euclidean_nearest_neighbor_distance",
-    "core": "total_core_area",
-    "nca": "number_of_core_areas",
-    "cai": "core_area_index",
+metric_map = {
+    "pland":         "proportion_of_landscape",       # class‑only
+    "np":            "number_of_patches",             # cross‑level
+    "pd":            "patch_density",                 # cross‑level
+    "lpi":           "largest_patch_index",           # cross‑level
+    "te":            "total_edge",                    # cross‑level
+    "edge_density":  "edge_density",                  # cross‑level
+    "lsi":           "landscape_shape_index",         # landscape‑only
+    "tca":           "total_core_area",               # landscape‑only
+    "mesh":          "effective_mesh_size",           # landscape‑only
+    "contag":        "contagion",                     # landscape‑only
+    "shdi":          "shannon_diversity_index",       # landscape‑only
+    "shei":          None,                            # not in PyLandStats core
+    "area":          "total_area",                    # class‑only
+    "perim":         "perimeter",                     # class‑only
+    "para":          "perimeter_area_ratio",          # class‑only
+    "shape":         "shape_index",                   # class‑only
+    "frac":          "fractal_dimension",             # class‑only
+    "enn":           "euclidean_nearest_neighbor",    # class‑only
+    "core":          "total_core_area",               # class‑only (alias of tca)
+    "nca":           "number_of_core_areas",          # class‑only
+    "cai":           "core_area_index",               # class‑only
 }
 
-# --- Level categories ---
-helper_methods = {
-    # cross‑level “fast” helpers
-    "pd":           "patch_density",             # Patch Density
-    "edge_density": "edge_density",             # Edge Density
-    "lsi":          "landscape_shape_index",     # Landscape Shape Index
-    "contag":       "contiguity_index",         # Contagion Index (method name in pylandstats is contiguity_index)
-    "shdi":         "shannon_diversity_index",   # Shannon Diversity Index
-    "shei":         "shannon_evenness_index",    # Shannon Evenness Index
-    "mesh":         "effective_mesh_size",       # Effective Mesh Size
-    "tca":          "total_core_area",           # Total Core Area
-    "lpi":          "largest_patch_index",       # Largest Patch Index
-    "te":           "total_edge",                # Total Edge
-}
+# helper_methods: drop any None mappings
+helper_methods = {k: v for k, v in metric_map.items() if v}
+
+# col_map: exactly the same — since the DataFrame columns use the same names
+col_map = helper_methods.copy()
+
 class_only = {"pland", "area", "perim", "para", "shape", "frac", "enn", "core", "nca", "cai"}
 cross_level = ["np", "pd", "lpi", "te", "edge_density"]
 
@@ -258,41 +250,70 @@ def llm_fallback(history):
 
 # --- Main handler (shortcut) ---
 def analyze_raster(file, question, history):
+    # Append the user’s query to the chat history
     hist  = history + [{"role":"user","content":question}]
     lower = question.lower()
 
-    # a) LIST METRICS shortcut
+    # 1️⃣ “List metrics” shortcut
     if re.search(r"\b(list|available).*metrics\b", lower):
         return list_metrics(hist)
 
-    # b) Ensure file is present
+    # 2️⃣ Metadata shortcut (CRS, resolution, extent, bands, nodata)
+    if re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower):
+        return answer_metadata(file, hist)
+
+    # 3️⃣ Class‑count shortcut (“how many classes”)
+    if re.search(r"\bnum(ber)? of classes\b", lower):
+        return count_classes(file, hist)
+
+    # 4️⃣ Ensure a file is loaded for any metric calculation
     if file is None:
         return hist + [{"role":"assistant",
                         "content":"Please upload a GeoTIFF before asking anything."}], ""
 
-    # c) Handle “all landscape level” or “all class level”
-    if re.search(r"\b(all).*(landscape[- ]level|landscape)\b", lower):
-        found = [k for k in metric_definitions if k not in class_only]
-    elif re.search(r"\b(all).*(class[- ]level|class)\b", lower):
-        found = list(class_only)
-    else:
-        # d) pick out explicit metrics by synonyms
-        found = []
-        for code,(fullname,_) in metric_definitions.items():
-            for syn in synonyms.get(code,[code,fullname.lower()]):
-                if re.search(rf"\b{re.escape(syn)}\b", lower) and code not in found:
-                    found.append(code)
+    # 5️⃣ Parse metric intents via LLM
+    parse = client.chat.completions.create(
+        model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
+        messages=[
+            {"role":"system","content":(
+                "Parse the user request into JSON with fields:\n"
+                "- metrics: list of metric codes (e.g. ['np','te'])\n"
+                "- level: 'landscape', 'class', or 'both'\n"
+                "- all_metrics: true/false\n"
+                "Output *only* valid JSON."
+            )},
+            {"role":"user","content":question}
+        ],
+        temperature=0.0
+    ).choices[0].message.content
 
-    # e) nothing matched → LLM fallback
-    if not found:
+    try:
+        req = json.loads(parse)
+    except json.JSONDecodeError:
+        req = {}
+
+    metrics  = req.get("metrics", [])
+    level    = req.get("level",   "both")
+    all_m    = req.get("all_metrics", False)
+
+    # 6️⃣ Expand “all_metrics” into the full list if requested
+    if all_m:
+        if level == "landscape":
+            metrics = [k for k in metric_definitions if k not in class_only]
+        elif level == "class":
+            metrics = list(class_only)
+
+    # 7️⃣ If no metrics parsed, fallback to conversational LLM
+    if not metrics:
         return llm_fallback(hist)
 
-    # f) dispatch
-    if len(found) > 1:
-        return compute_multiple_metrics(file, found, hist)
-    # single metric → show both levels
-    return compute_multiple_metrics(file, found, hist)
-
+    # 8️⃣ Dispatch to the correct compute helper
+    if level == "landscape":
+        return compute_landscape_only(file, metrics, hist)
+    if level == "class":
+        return compute_class_only(file, metrics, hist)
+    # default: both levels
+    return compute_multiple_metrics(file, metrics, hist)
 
 # --- UI setup & launch ---
 initial_history = [{"role":"assistant","content":"👋 Hi! I’m Spatchat. Upload a GeoTIFF to begin—then ask for any landscape metric."}]
