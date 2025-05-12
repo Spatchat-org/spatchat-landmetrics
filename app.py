@@ -230,38 +230,35 @@ def run_compute_metrics(file, raw_metrics, level):
         else:
             unknown.append(m)
             continue
-            
         if metric_map.get(cand) is None:
-            # e.g. "shei"
             unknown.append(m)
         else:
             mapped.append(cand)
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # 2) if the user explicitly asked "landscape" or "class", honor that
-        land = [c for c in mapped if c not in class_only]
+    # 2) split into landscape vs class lists
+    land = [c for c in mapped if c not in class_only]
+    clas = [c for c in mapped if c in class_only]
+
+    # 3) honor explicit level
+    if level == "landscape":
         return compute_landscape_only_text(file, land)
-
     if level == "class":
-        clas = [c for c in mapped if c in class_only]
         return compute_class_only_text(file, clas)
-
-    # 3) otherwise infer from the mix of codes
-    has_x = any(c in cross_level for c in mapped)
-    has_c = any(c in class_only   for c in mapped)
-
-    # a) mixed → both
-    if has_x and has_c:
+    if level == "both":
         return compute_multiple_metrics_text(file, mapped)
 
-    # b) only cross‑level → landscape only
-    if has_x:
-        land = [c for c in mapped if c in cross_level]
+    # 4) infer from the mix
+    has_x = bool(land)
+    has_c = bool(clas)
+    if has_x and has_c:
+        return compute_multiple_metrics_text(file, mapped)
+    elif has_x:
         return compute_landscape_only_text(file, land)
+    else:
+        return compute_class_only_text(file, clas)
 
-    # c) only class‑level → class only
-    return compute_class_only_text(file, mapped)
 
 
 # ───── System & Fallback Prompts ────────────────────────────────────────
