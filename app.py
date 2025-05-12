@@ -218,7 +218,7 @@ def run_list_metrics(file):
     return list_metrics_text()
 
 def run_compute_metrics(file, raw_metrics, level):
-    # 1) normalize + map synonyms → canonical codes, collect unknowns
+    # 1) Normalize + map synonyms → canonical codes, collect unknowns
     mapped, unknown = [], []
     for m in raw_metrics:
         ml = m.lower()
@@ -238,23 +238,28 @@ def run_compute_metrics(file, raw_metrics, level):
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # 2) split into landscape (cross‑level) vs class
+    # 2) Split into cross‑level vs class‑only
     land = [c for c in mapped if c in cross_level]
     clas = [c for c in mapped if c in class_only]
 
-    # 3) honor explicit level flag
+    # 3) Honor an explicit “level:” flag from the LLM
     if level == "landscape":
+        # user wants summary only
         return compute_landscape_only_text(file, land or mapped)
     if level == "class":
-        return compute_class_only_text   (file, clas or mapped)
+        # user wants class table only
+        return compute_class_only_text(file, clas or mapped)
     if level == "both":
+        # user explicitly asked for both
         return compute_multiple_metrics_text(file, mapped)
 
-    # 4) default inference:
-    #    any cross‑level → BOTH; else → class only
+    # 4) Default inference: if *any* cross‑level metric is present → BOTH
     if land:
         return compute_multiple_metrics_text(file, mapped)
+
+    # 5) Otherwise pure class‑only
     return compute_class_only_text(file, mapped)
+
 
 
 # ───── System & Fallback Prompts ────────────────────────────────────────
