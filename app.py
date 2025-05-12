@@ -218,9 +218,16 @@ def run_list_metrics(file):
     return list_metrics_text()
 
 def run_compute_metrics(file, raw_metrics, level):
-    # 1) normalize + map synonyms & reject unmapped codes
-    mapped = []
-    unknown = []
+    """
+    1) Normalize + map synonyms (via reverse_synonyms) into our canonical codes.
+    2) Reject any unknown or un‑mapped codes.
+    3) Honor explicit level if the LLM gave one.
+    4) Otherwise:
+       - If there's ANY cross‑level metric in the mix → compute BOTH
+       - Else → compute CLASS only
+    """
+    # 1) normalize + map
+    mapped, unknown = [], []
     for m in raw_metrics:
         ml = m.lower()
         if ml in metric_definitions:
@@ -231,7 +238,7 @@ def run_compute_metrics(file, raw_metrics, level):
             unknown.append(m)
             continue
 
-        # drop those with no mapping in metric_map (e.g. 'shei')
+        # reject metrics we can’t compute (None in metric_map)
         if metric_map.get(cand) is None:
             unknown.append(m)
         else:
@@ -240,31 +247,25 @@ def run_compute_metrics(file, raw_metrics, level):
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # split into class‑only vs cross‑level
-    land  = [c for c in mapped if c not in class_only]
-    clas  = [c for c in mapped if c in class_only]
+    # split into landscape vs class
+    land = [c for c in mapped if c not in class_only]
+    clas = [c for c in mapped if c in class_only]
 
-    # 2) honor explicit level
+    # 2) honor explicit level from LLM
     if level == "landscape":
         return compute_landscape_only_text(file, land)
     if level == "class":
-        return compute_class_only_text   (file, mapped)
+        return compute_class_only_text   (file, clas)
     if level == "both":
         return compute_multiple_metrics_text(file, mapped)
 
-    # 3) no explicit level → infer defaults
-    #  a) all class‑only → class table
-    if all(c in class_only    for c in mapped):
-        return compute_class_only_text   (file, mapped)
-    #  b) all cross‑level → BOTH landscape + class
-    if all(c in cross_level    for c in mapped):
+    # 3) infer defaults
+    if land:
+        # ANY cross‑level → BOTH
         return compute_multiple_metrics_text(file, mapped)
-    #  c) mixture → BOTH
-    return compute_multiple_metrics_text(file, mapped)
 
-
-
-
+    # pure class‑only
+    return compute_class_only_text(file, mapped)
 
 # ───── System & Fallback Prompts ────────────────────────────────────────
 
