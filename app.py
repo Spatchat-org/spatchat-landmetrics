@@ -232,12 +232,14 @@ def compute_multiple_metrics(file, keys, history):
     return chat, ""
 
 
+# --- LLM fallback: conversational only ---
 def llm_fallback(history):
     prompt = [
         {"role":"system","content":(
-            "You are Spatchat, a helpful assistant for landscape metrics. "
-            "Use rasterio for metadata and pylandstats for metrics; "
-            "otherwise be conversational and ask the user to clarify."
+            "You are Spatchat, a friendly GIS assistant and expert in landscape metrics using PyLandStats. "
+            "Do NOT invent numbers—always use the Python helper functions for any metric requests (e.g., calculate, compute, or get [metrics]). "
+            "If you encounter unknown metric codes, ask the user to clarify. "
+            "Otherwise, you may chat conversationally and guide the user through your process, but keep replies to no more than two sentences."
         )},
         *history
     ]
@@ -248,14 +250,12 @@ def llm_fallback(history):
     ).choices[0].message.content
     return history + [{"role":"assistant","content":resp}], ""
 
-
-# --- Main handler (shortcut) ---
+# --- Main handler ---
 def analyze_raster(file, question, history):
-    # append the user’s query to the chat history
-    hist = history + [{"role":"user","content":question}]
+    hist  = history + [{"role":"user","content":question}]
     lower = question.lower()
 
-    # 0️⃣ Simple shortcuts, no LLM needed
+    # zero‑prompt shortcuts
     if re.search(r"\b(list|available).*metrics\b", lower):
         return list_metrics(hist)
     if re.search(r"\bhow many classes\b", lower):
@@ -263,24 +263,23 @@ def analyze_raster(file, question, history):
     if re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower):
         return answer_metadata(file, hist)
 
-    # 1️⃣ Make sure a raster is loaded before doing anything more complex
+    # ensure raster loaded
     if file is None:
-        return hist + [{"role":"assistant","content":
-                        "Please upload a GeoTIFF before asking anything."}], ""
+        return hist + [{"role":"assistant","content":"Please upload a GeoTIFF before asking anything."}], ""
 
-    # 2️⃣ Ask the LLM to parse out intents & slots
+    # parse intents & slots via LLM
     parse = client.chat.completions.create(
         model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
         messages=[
             {"role":"system","content":(
-                "Parse the user request into JSON with these fields:\n"
+                "Parse the user request into JSON with fields:\n"
                 "- list_metrics: true/false\n"
                 "- count_classes: true/false\n"
                 "- metadata: true/false\n"
-                "- metrics: [list of metric codes]\n"
-                "- level: 'landscape', 'class', or 'both'\n"
+                "- metrics: [codes]\n"
+                "- level: 'landscape','class','both'\n"
                 "- all_metrics: true/false\n"
-                "Output only valid JSON."
+                "Output only the JSON."
             )},
             {"role":"user","content":question}
         ],
@@ -292,7 +291,7 @@ def analyze_raster(file, question, history):
     except json.JSONDecodeError:
         req = {}
 
-    # 3️⃣ Apply the parsed instructions
+    # honor direct flags
     if req.get("list_metrics"):
         return list_metrics(hist)
     if req.get("count_classes"):
@@ -300,28 +299,36 @@ def analyze_raster(file, question, history):
     if req.get("metadata"):
         return answer_metadata(file, hist)
 
-    metrics    = req.get("metrics", [])
-    level      = req.get("level", "both")
-    all_m      = req.get("all_metrics", False)
+    metrics = req.get("metrics", [])
+    level   = req.get("level", "both")
+    all_m   = req.get("all_metrics", False)
 
-    # 4️⃣ Expand “all metrics” if requested
+    # expand “all metrics”
     if all_m:
-        if level == "landscape":
+        if level=="landscape":
             metrics = [m for m in metric_definitions if m not in class_only]
-        elif level == "class":
+        elif level=="class":
             metrics = list(class_only)
 
-    # 5️⃣ Nothing to do? fall back to the normal LLM responder
-    if not metrics:
+    # split known vs unknown
+    known = [m for m in metrics if m in metric_definitions]
+    unknown = [m for m in metrics if m not in metric_definitions]
+    if unknown:
+        return hist + [{"role":"assistant","content":
+            f"Sorry, I don’t recognize the metric(s): {', '.join(unknown)}. Could you clarify?"}], ""
+
+    if not known:
         return llm_fallback(hist)
 
-    # 6️⃣ Dispatch to the right helper
-    if level == "landscape":
-        return compute_landscape_only(file, metrics, hist)
-    elif level == "class":
-        return compute_class_only(file, metrics, hist)
-    else:
-        return compute_multiple_metrics(file, metrics, hist)
+    # dispatch true computations
+    # landscape‑only
+    if level=="landscape":
+        return compute_landscape_only(file, known, hist)
+    # class‑only
+    if level=="class":
+        return compute_class_only   (file, known, hist)
+    # both
+    return compute_multiple_metrics(file, known, hist)
 
 # --- UI setup & launch ---
 initial_history = [{"role":"assistant","content":"👋 Hi! I’m Spatchat. Upload a GeoTIFF to begin—then ask for any landscape metric."}]
