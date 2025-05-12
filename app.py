@@ -193,19 +193,17 @@ def compute_class_only_text(file, keys):
     return f"**Class-level metrics:**\n{tbl}"
 
 def compute_multiple_metrics_text(file, keys):
-    # landscape portion: everything except strict class‑only
-    land_keys = [c for c in keys if c not in class_only]
+    # split into pure‑landscape vs class‑only
+    land_keys  = [c for c in keys if c not in class_only]
+    class_keys = [c for c in keys if c in class_only]
 
-    # class portion: class‑only + cross‑level
-    class_keys = [c for c in keys if c in class_only or c in cross_level]
-
-    parts = []
+    out = []
     if land_keys:
-        parts.append(compute_landscape_only_text(file, land_keys))
+        out.append(compute_landscape_only_text(file, land_keys))
     if class_keys:
-        parts.append(compute_class_only_text(file, class_keys))
+        out.append(compute_class_only_text(file, class_keys))
 
-    return "\n\n".join(parts)
+    return "\n\n".join(out)
 
 # ───── Your “tools” ─────────────────────────────────────────────────────
 
@@ -219,7 +217,7 @@ def run_list_metrics(file):
     return list_metrics_text()
 
 def run_compute_metrics(file, raw_metrics, level):
-    # 1) normalize + map synonyms
+    # 1) normalize + map synonyms & reject any None‑mapped code
     mapped = []
     unknown = []
     for m in raw_metrics:
@@ -229,39 +227,37 @@ def run_compute_metrics(file, raw_metrics, level):
         elif ml in reverse_synonyms:
             cand = reverse_synonyms[ml]
         else:
-            unknown.append(m); continue
-        # drop any code with no helper
+            unknown.append(m)
+            continue
+            
         if metric_map.get(cand) is None:
+            # e.g. "shei"
             unknown.append(m)
         else:
             mapped.append(cand)
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # 2) determine effective level
-    # always both for any cross‑level metric
+    # 2) enforce “both” whenever any cross‑level metric is present
     if any(c in cross_level for c in mapped):
         eff = "both"
-    # only class‑only?
-    elif all(c in class_only for c in mapped):
-        eff = "class"
-    # otherwise landscape‑only
     else:
-        eff = "landscape"
+        eff = level  # respect the LLM’s level when it’s not cross‑level
 
-    # 3) dispatch with proper filtering
+    # 3) dispatch
     if eff == "landscape":
-        # drop any class‑only codes
+        # only true landscape codes
         land = [c for c in mapped if c not in class_only]
         return compute_landscape_only_text(file, land)
 
     if eff == "class":
-        # only class‑only + cross‑level
-        clas = [c for c in mapped if c in class_only or c in cross_level]
+        # only class‑only codes
+        clas = [c for c in mapped if c in class_only]
         return compute_class_only_text(file, clas)
 
     # both
     return compute_multiple_metrics_text(file, mapped)
+
 
 # ───── System & Fallback Prompts ────────────────────────────────────────
 
