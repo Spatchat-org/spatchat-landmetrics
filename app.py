@@ -194,21 +194,25 @@ def compute_class_only_text(file, keys):
     return f"**Class-level metrics:**\n{tbl}"
 
 def compute_multiple_metrics_text(file, keys):
-    # split into pure‑landscape vs class‑only
+    """
+    For any requested metrics (landscape‐only, cross‐level or class‐only),
+    always show the landscape summary for non‐class‐only metrics,
+    and always show the class‐level table for ALL metrics (including cross‐level).
+    """
+    # 1) Landscape summary for anything that isn’t purely class‐only
     land_keys  = [c for c in keys if c not in class_only]
-    class_keys = [c for c in keys if c     in class_only]
 
-    # ── PATCH: if they asked only cross‑level metrics, also show them per‑class ──
-    if land_keys and not class_keys:
-        class_keys = land_keys.copy()
+    # 2) Class‐level breakdown for everything
+    class_keys = keys
 
-    out = []
+    parts = []
     if land_keys:
-        out.append(compute_landscape_only_text(file, land_keys))
+        parts.append(compute_landscape_only_text(file, land_keys))
     if class_keys:
-        out.append(compute_class_only_text(file, class_keys))
+        parts.append(compute_class_only_text(file, class_keys))
 
-    return "\n\n".join(out)
+    return "\n\n".join(parts)
+
 
 
 # ───── Your “tools” ─────────────────────────────────────────────────────
