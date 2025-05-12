@@ -247,41 +247,52 @@ def analyze_raster(file, question, history):
     hist  = history + [{"role": "user", "content": question}]
     lower = question.lower()
 
-    # 1️⃣ Always allow "list metrics" without a file
+    # 1️⃣ Always allow "list metrics"
     if re.search(r"\b(list|available).*metrics\b", lower):
         return list_metrics(hist)
 
-    # 2️⃣ Other simple handlers
+    # 2️⃣ Must have a file for anything else
     if file is None:
-        return hist + [{"role": "assistant", "content": "Please upload a GeoTIFF before asking anything."}], ""
-    if "how many classes" in lower or re.search(r"\bnum(ber)? of classes\b", lower):
+        return hist + [{"role": "assistant",
+                        "content": "Please upload a GeoTIFF before asking anything."}], ""
+
+    # 3️⃣ Handle multi‑question combos first
+    want_count = bool(re.search(r"\bnum(ber)? of classes\b", lower))
+    want_meta  = bool(re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower))
+    if want_count and want_meta:
+        # run both handlers in sequence
+        h1, _ = count_classes(file, hist)
+        h2, _ = answer_metadata(file, h1)
+        return h2, ""
+
+    # 4️⃣ Individual shortcuts
+    if want_count:
         return count_classes(file, hist)
-    if re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower):
+    if want_meta:
         return answer_metadata(file, hist)
 
-    # 3️⃣ Detect explicit level qualifiers
+    # 5️⃣ Detect level qualifiers
     is_land  = bool(re.search(r"\blandscape[- ]level\b", lower))
     is_class = bool(re.search(r"\bclass[- ]level\b",     lower))
 
-    # 4️⃣ Handle "all ... metrics" requests first
+    # 6️⃣ "all … metrics" shortcuts
     if is_land and "all" in lower:
-        # all metrics except strictly class-only
         found = [c for c in metric_definitions if c not in class_only]
     elif is_class and "all" in lower:
         found = list(class_only)
     else:
-        # 5️⃣ Otherwise, pick out only those keys mentioned
+        # 7️⃣ Otherwise pick out explicit metric names
         found = []
         for code, (fullname, _) in metric_definitions.items():
             for syn in synonyms.get(code, [code, fullname.lower()]):
                 if re.search(rf"\b{re.escape(syn)}\b", lower) and code not in found:
                     found.append(code)
 
-    # 6️⃣ If nothing matched, send to LLM fallback
+    # 8️⃣ Nothing matched?  Fallback to LLM
     if not found:
         return llm_fallback(hist)
 
-    # 7️⃣ Branch on multi vs. single
+    # 9️⃣ Dispatch to helpers
     if len(found) > 1:
         if is_land:
             return compute_landscape_only(file, found, hist)
@@ -294,9 +305,7 @@ def analyze_raster(file, question, history):
             return compute_landscape_only(file, [key], hist)
         if is_class:
             return compute_class_only(file, [key], hist)
-        # default: show both levels for that single metric
         return compute_multiple_metrics(file, [key], hist)
-
 
 def count_classes(file, history):
     with rasterio.open(file.name) as src:
