@@ -161,15 +161,11 @@ def list_metrics(history):
     return history + [{"role": "assistant", "content": "\n".join(lines)}], ""
 
 def _build_landscape(file):
-    import rasterio, numpy as np
-    from pylandstats import Landscape
-
     with rasterio.open(file.name) as src:
         raw    = src.read(1)
         x_res, y_res = src.res
         nodata = src.nodata or 0
 
-    # If you have string‐labeled classes, map to ints
     if raw.dtype.kind in ("U","S","O"):
         data_str   = raw.astype(str)
         uniq_names = np.unique(data_str[data_str!=""])
@@ -179,124 +175,122 @@ def _build_landscape(file):
             arr[data_str==nm] = code
         return Landscape(arr, res=(x_res, y_res), nodata=0)
 
-    # Otherwise feed the file directly
     return Landscape(file.name, nodata=nodata, res=(x_res, y_res))
 
 
 def compute_landscape_only(file, keys, history):
     ls    = _build_landscape(file)
     parts = []
-
     for key in keys:
         name, _ = metric_definitions[key]
 
-        # cross‑level NP
         if key == "np":
-            df = ls.compute_class_metrics_df(metrics=["number_of_patches"])
+            df  = ls.compute_class_metrics_df(metrics=["number_of_patches"])
             val = int(df["number_of_patches"].sum())
 
-        # fast helpers
         elif key in helper_methods:
+            # ensure helper_methods["contag"] → "contiguity_index"
             val = getattr(ls, helper_methods[key])()
 
-        # true landscape‑only
         else:
             df  = ls.compute_landscape_metrics_df(metrics=[col_map[key]])
             val = df[col_map[key]].iloc[0]
 
-        # format
-        if isinstance(val, float):
-            parts.append(f"**{name} ({key.upper()}):** {val:.4f}")
-        else:
-            parts.append(f"**{name} ({key.upper()}):** {val}")
+        parts.append(
+            f"**{name} ({key.upper()}):** {val:.4f}"
+            if isinstance(val, float)
+            else f"**{name} ({key.upper()}):** {val}"
+        )
 
     content = "\n\n".join(parts)
     return history + [{"role":"assistant","content":content}], ""
 
+
 def compute_class_only(file, keys, history):
-    """
-    Compute *only* the class‐level metrics for the given keys.
-    Returns (new_history, ""), where new_history is the chat history list.
-    """
     ls   = _build_landscape(file)
     cols = [col_map[k] for k in keys]
-    # get a DataFrame of class‐level metrics
     df   = (
         ls
         .compute_class_metrics_df(metrics=cols)
         .rename_axis("code")
         .reset_index()
     )
-    # build friendly class names
     df["class_name"] = df["code"].astype(int).apply(lambda c: f"Class {c}")
-
-    # reorder into [class_name, metric1, metric2, ...]
     out_cols = ["class_name"] + cols
     tbl      = df[out_cols].to_markdown(index=False)
-
     content  = f"**Class-level metrics:**\n{tbl}"
     return history + [{"role":"assistant","content":content}], ""
 
 
+
 def compute_multiple_metrics(file, keys, history):
-    # landscape_keys = only those that make sense at the landscape level
+    # split into landscape‑eligible vs class‑eligible
     landscape_keys = [k for k in keys if k not in class_only]
-    # class_keys = we always want the full set at class level
     class_keys     = keys
 
-    # run landscape‑only first (if any)
+    # 1) landscape part
     chat, _ = (
         compute_landscape_only(file, landscape_keys, history)
-        if landscape_keys
-        else (history, "")
+        if landscape_keys else (history, "")
     )
-
-    # then append the class‑only table
+    # 2) class part
     chat, _ = compute_class_only(file, class_keys, chat)
-
     return chat, ""
 
 
 def llm_fallback(history):
+    prompt = [
+        {"role":"system","content":(
+            "You are Spatchat, a helpful assistant for landscape metrics. "
+            "Use rasterio for metadata and pylandstats for metrics; "
+            "otherwise be conversational and ask the user to clarify."
+        )},
+        *history
+    ]
     resp = client.chat.completions.create(
         model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-        messages=[{"role": "system", "content": "You are Spatchat, assist with landscape metrics."}] + history,
+        messages=prompt,
         temperature=0.4
     ).choices[0].message.content
-    return history + [{"role": "assistant", "content": resp}], ""
+    return history + [{"role":"assistant","content":resp}], ""
+
 
 # --- Main handler (shortcut) ---
 def analyze_raster(file, question, history):
-    history, _ = notify_upload(file, history)
+    hist  = history + [{"role":"user","content":question}]
     lower = question.lower()
 
+    # a) LIST METRICS shortcut
     if re.search(r"\b(list|available).*metrics\b", lower):
-        return list_metrics(history)
-    if not file:
-        return history + [{"role": "assistant", "content": "Please upload a GeoTIFF first."}], ""
-    if re.search(r"how many classes", lower):
-        return count_classes(file, history)
-    if re.search(r"\b(crs|resolution|extent|bands|nodata)\b", lower):
-        return answer_metadata(file, history)
+        return list_metrics(hist)
 
-    # find metrics
-    found = []
-    for code in metric_definitions:
-        for syn in synonyms.get(code, [code]):
-            if syn in lower and code not in found:
-                found.append(code)
+    # b) Ensure file is present
+    if file is None:
+        return hist + [{"role":"assistant",
+                        "content":"Please upload a GeoTIFF before asking anything."}], ""
 
-    if not found:
-        return llm_fallback(history)
-
-    # dispatch
-    if len(found) > 1:
-        return compute_multiple_metrics(file, found, history)
-    # single metric: decide level
-    if any((f == "np") or (f in helper_methods) for f in found):
-        return compute_landscape_only(file, found, history)
+    # c) Handle “all landscape level” or “all class level”
+    if re.search(r"\b(all).*(landscape[- ]level|landscape)\b", lower):
+        found = [k for k in metric_definitions if k not in class_only]
+    elif re.search(r"\b(all).*(class[- ]level|class)\b", lower):
+        found = list(class_only)
     else:
-        return compute_class_only(file, found, history)
+        # d) pick out explicit metrics by synonyms
+        found = []
+        for code,(fullname,_) in metric_definitions.items():
+            for syn in synonyms.get(code,[code,fullname.lower()]):
+                if re.search(rf"\b{re.escape(syn)}\b", lower) and code not in found:
+                    found.append(code)
+
+    # e) nothing matched → LLM fallback
+    if not found:
+        return llm_fallback(hist)
+
+    # f) dispatch
+    if len(found) > 1:
+        return compute_multiple_metrics(file, found, hist)
+    # single metric → show both levels
+    return compute_multiple_metrics(file, found, hist)
 
 
 # --- UI setup & launch ---
