@@ -411,7 +411,7 @@ with gr.Blocks(title="Spatchat") as iface:
     
     with gr.Row():
         with gr.Column(scale=1):
-            file_input = gr.File(label="Upload GeoTIFF", type="filepath")
+            file_input = gr.File(label="Upload GeoTIFF", type="filepath", file_types=[".tif",".tiff"])
             raster_out = gr.Plot(label="Raster Preview")
             clear_btn = gr.Button("Clear Raster")
         with gr.Column(scale=1):
