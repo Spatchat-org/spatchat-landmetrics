@@ -87,7 +87,7 @@ landscape_only = [
     if k not in class_only and k not in cross_level
 ]
 
-# --- Raster preview helpers (unchanged) ---
+# --- Raster preview helpers ---
 def no_raster_fig():
     fig, ax = plt.subplots(figsize=(5,5))
     ax.text(0.5,0.5,"🗂️ No raster loaded.",
@@ -127,7 +127,7 @@ def notify_upload(file, history):
         return history + [{"role":"assistant","content":"📥 Raster uploaded successfully!"}], ""
     return history, ""
 
-# --- Core metric / metadata helpers (unchanged) ---
+# --- Core metric / metadata helpers ---
 def answer_metadata(file):
     with rasterio.open(file.name) as src:
         return (
@@ -145,11 +145,11 @@ def count_classes(file):
     return f"Your raster contains {len(vals)} unique classes."
 
 def list_metrics_text():
-    lines = ["**Cross‑level metrics:**"]
+    lines = ["**Cross-level metrics:**"]
     lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in cross_level]
-    lines.append("\n**Landscape‑only:**")
+    lines.append("\n**Landscape-only:**")
     lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in helper_methods]
-    lines.append("\n**Class‑only:**")
+    lines.append("\n**Class-only:**")
     lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in class_only]
     return "\n".join(lines)
 
@@ -171,12 +171,12 @@ def _build_landscape(file):
 
 def compute_landscape_only_text(file, keys):
     ls = _build_landscape(file)
-    parts = []
+    parts = ["**Landscape-level metrics:**"]
     for key in keys:
         name,_ = metric_definitions[key]
         if key=="np":
             df = ls.compute_class_metrics_df(metrics=["number_of_patches"])
-            val= int(df["number_of_patches"].sum())
+            val = int(df["number_of_patches"].sum())
         elif key in helper_methods:
             val = getattr(ls, helper_methods[key])()
         else:
@@ -184,7 +184,7 @@ def compute_landscape_only_text(file, keys):
             val = df[col_map[key]].iloc[0]
         parts.append(
             f"**{name} ({key.upper()}):** {val:.4f}"
-            if isinstance(val,float)
+            if isinstance(val, float)
             else f"**{name} ({key.upper()}):** {val}"
         )
     return "\n\n".join(parts)
@@ -193,36 +193,21 @@ def compute_class_only_text(file, keys):
     ls   = _build_landscape(file)
     cols = [col_map[k] for k in keys]
     df   = ls.compute_class_metrics_df(metrics=cols).rename_axis("code").reset_index()
-    df["class_name"] = df["code"].astype(int).apply(lambda c:f"Class {c}")
+    df["class_name"] = df["code"].astype(int).apply(lambda c: f"Class {c}")
     tbl  = df[["class_name"] + cols].to_markdown(index=False)
     return f"**Class-level metrics:**\n{tbl}"
 
 def compute_multiple_metrics_text(file, keys):
-    # which keys go to the landscape summary?
     land_keys  = [k for k in keys if k in cross_level or k in landscape_only]
-    # which keys go to the class table?
-    class_keys = keys
-
-    # DEBUG: inspect what got passed in
-    print(">>> compute_multiple_metrics_text called with keys:", keys)
-    print(">>> land_keys:", land_keys)
-    print(">>> class_keys:", class_keys)
-
+    class_keys = [k for k in keys if k in class_only]
     parts = []
     if land_keys:
         parts.append(compute_landscape_only_text(file, land_keys))
     if class_keys:
-        table = compute_class_only_text(file, class_keys)
-        # DEBUG: inspect what the class table actually is
-        print(">>> compute_class_only_text returned:\n", table)
-        parts.append(table)
-
+        parts.append(compute_class_only_text(file, class_keys))
     return "\n\n".join(parts)
 
-
-
-# ───── Your “tools” ─────────────────────────────────────────────────────
-
+# --- Tool wrappers ---
 def run_metadata(file):
     return answer_metadata(file)
 
@@ -251,92 +236,80 @@ def run_compute_metrics(file, raw_metrics, level):
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
 
-    # split into cross‐level vs class‐only
-    land  = [c for c in mapped if c not in class_only]
-    clas  = [c for c in mapped if c in class_only]
+    # split into cross-level vs class-only
+    land = [c for c in mapped if c not in class_only]
+    clas = [c for c in mapped if c in class_only]
     any_cross = bool(set(mapped) & set(cross_level))
 
-    # 2) honor explicit “class level” request
+    # explicit class request
     if level == "class":
         return compute_class_only_text(file, mapped)
-
-    # 3) honor explicit “landscape level” request
+    # explicit landscape request
     if level == "landscape":
+        if not land and clas:
+            return compute_class_only_text(file, clas)
         return compute_landscape_only_text(file, land)
-
-    # 4) otherwise infer:
-    #    – if any cross‐level metric requested → show both
+    # infer: cross-level -> both
     if any_cross:
         return compute_multiple_metrics_text(file, mapped)
-    #    – else pure class‐only → class table
+    # else class-only
     return compute_class_only_text(file, mapped)
 
-
-# ───── System & Fallback Prompts ────────────────────────────────────────
-
+# --- System & Fallback Prompts ---
 SYSTEM_PROMPT = """
 You are Spatchat, a friendly GIS assistant and expert in landscape metrics using PyLandStats.
 Whenever the user asks for metadata (crs, resolution, extent, bands, nodata), reply _only_ with:
-{"tool":"metadata"}
+{\"tool\":\"metadata\"}
 
 Whenever they ask “how many classes” or similar, reply:
-{"tool":"count_classes"}
+{\"tool\":\"count_classes\"}
 
 If they ask “list metrics” or “available metrics”, reply:
-{"tool":"list_metrics"}
+{\"tool\":\"list_metrics\"}
 
 If they ask to compute metrics, reply exactly:
-{"tool":"compute_metrics","level":"landscape"|"class"|"both","metrics":[<codes>]}
-Do NOT invent numbers—your Python functions will compute them.  
+{\"tool\":\"compute_metrics\",\"level\":\"landscape\"|\"class\"|\"both\",\"metrics\":[<codes>]}
+Do NOT invent numbers—your Python functions will compute them.
 If you see unknown codes, ask the user to clarify.
 """.strip()
 
 FALLBACK_PROMPT = """
-You are Spatchat, a landscape‑metrics expert.  
-Keep replies under two sentences.  
+You are Spatchat, a landscape-metrics expert.
+Keep replies under two sentences.
 If you can’t map a request to one of your tools, ask the user to clarify.
 """.strip()
 
-# ───── Main handler ─────────────────────────────────────────────────────
-
+# --- Main handler ---
 def analyze_raster(file, user_msg, history):
     hist = history + [{"role":"user","content":user_msg}]
     lower = user_msg.lower()
 
-    # 1️⃣ Ensure there's a raster
     if file is None:
         hist.append({"role":"assistant","content":
                      "Please upload a GeoTIFF before asking anything."})
         return hist, ""
 
-    # ─── Zero‑prompt shortcuts ───────────────────────────────────────────────
-    # “all landscape level metrics”
+    # shortcuts
     if re.search(r"\ball landscape(?: level)? metrics\b", lower):
         keys = [k for k in metric_map if metric_map.get(k) and k not in class_only]
         return hist + [{"role":"assistant","content":compute_landscape_only_text(file, keys)}], ""
-
-    # “all class level metrics”
     if re.search(r"\ball class(?: level)? metrics\b", lower):
         keys = list(class_only)
         return hist + [{"role":"assistant","content":compute_class_only_text(file, keys)}], ""
-
-    # “all metrics”
     if re.search(r"\ball metrics\b", lower):
         keys = [k for k in metric_map if metric_map.get(k)]
         return hist + [{"role":"assistant","content":compute_multiple_metrics_text(file, keys)}], ""
 
-    # 2️⃣ Ask the LLM which tool to call
+    # LLM tool chooser
     resp = client.chat.completions.create(
         model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
         messages=[{"role":"system","content":SYSTEM_PROMPT}] + hist,
         temperature=0.0
     ).choices[0].message.content
 
-    # 3️⃣ Parse JSON
     try:
         call = json.loads(resp)
     except:
-        # fallback to conversation
         conv = client.chat.completions.create(
             model="meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
             messages=[{"role":"system","content":FALLBACK_PROMPT}] + hist,
@@ -352,13 +325,11 @@ def analyze_raster(file, user_msg, history):
         reply = run_count_classes(file)
     elif tool=="list_metrics":
         reply = run_list_metrics(file)
-    elif tool == "compute_metrics":
+    elif tool=="compute_metrics":
         raw_metrics = call.get("metrics", [])
         level       = call.get("level", "both")
-
-        # 1️⃣ normalize + map synonyms → canonical codes
-        mapped   = []
-        unknowns = []
+        # map & compute
+        mapped, unknowns = [], []
         for m in raw_metrics:
             ml = m.lower()
             if ml in metric_definitions:
@@ -367,12 +338,9 @@ def analyze_raster(file, user_msg, history):
                 mapped.append(reverse_synonyms[ml])
             else:
                 unknowns.append(m)
-
-        # 2️⃣ if any still unknown, ask to clarify
         if unknowns:
             reply = f"Sorry, I don’t recognize: {', '.join(unknowns)}. Could you clarify?"
         else:
-            # 3️⃣ compute with canonical codes
             reply = run_compute_metrics(file, mapped, level)
     else:
         reply = "Sorry, I didn’t understand that. Could you clarify?"
@@ -381,48 +349,58 @@ def analyze_raster(file, user_msg, history):
     return hist, ""
 
 # --- UI setup & launch ---
-initial_history = [{"role":"assistant","content":"👋 Hi! I’m Spatchat. Upload a GeoTIFF to begin—then ask for any landscape metric."}]
+initial_history = [{"role":"assistant","content":
+                   "👋 Hi! I’m Spatchat. Upload a GeoTIFF to begin—then ask for any landscape metric."}]
 
 with gr.Blocks(title="Spatchat") as iface:
     gr.HTML('<head><link rel="icon" href="logo1.png"></head>')
-    gr.Image(value="logo_long1.png", type="filepath", show_label=False, show_download_button=False, show_share_button=False, elem_id="logo-img")
+    gr.Image(value="logo_long1.png", type="filepath",
+             show_label=False, show_download_button=False,
+             show_share_button=False, elem_id="logo-img")
     gr.HTML("<style>#logo-img img{height:90px;margin:10px;border-radius:6px;}</style>")
     gr.Markdown("## 🌲 Spatchat: Landscape Metrics Assistant {landmetrics}")
-    gr.HTML("""
-    <div style="margin-top: -10px; margin-bottom: 15px;">
-      <input type="text" value="https://spatchat.org/browse/?room=landmetrics" id="shareLink" readonly style="width: 50%; padding: 5px; background-color: #f8f8f8; color: #222; font-weight: 500; border: 1px solid #ccc; border-radius: 4px;">
-      <button onclick="navigator.clipboard.writeText(document.getElementById('shareLink').value)" style="padding: 5px 10px; background-color: #007BFF; color: white; border: none; border-radius: 4px; cursor: pointer;">
-        📋 Copy Share Link
-      </button>
-      <div style="margin-top: 10px; font-size: 14px;">
-        <b>Share:</b>
-        <a href="https://twitter.com/intent/tweet?text=Checkout+Spatchat!&url=https://spatchat.org/browse/?room=landmetrics" target="_blank">🐦 Twitter</a> |
-        <a href="https://www.facebook.com/sharer/sharer.php?u=https://spatchat.org/browse/?room=landmetrics" target="_blank">📘 Facebook</a>
+    gr.HTML(\"\"\"
+      <div style="margin-top: -10px; margin-bottom: 15px;">
+        <input type="text" value="https://spatchat.org/browse/?room=landmetrics" id="shareLink" readonly style="width: 50%; padding: 5px; background-color: #f8f8f8; color: #222; font-weight: 500; border: 1px solid #ccc; border-radius: 4px;">
+        <button onclick="navigator.clipboard.writeText(document.getElementById('shareLink').value)" style="padding: 5px 10px; background-color: #007BFF; color: white; border: none; border-radius: 4px; cursor: pointer;">
+          📋 Copy Share Link
+        </button>
+        <div style="margin-top: 10px; font-size: 14px;">
+          <b>Share:</b>
+          <a href="https://twitter.com/intent/tweet?text=Checkout+Spatchat!&url=https://spatchat.org/browse/?room=landmetrics" target="_blank">🐦 Twitter</a> |
+          <a href="https://www.facebook.com/sharer/sharer.php?u=https://spatchat.org/browse/?room=landmetrics" target="_blank">📘 Facebook</a>
+        </div>
       </div>
-    </div>
-    """)
-    gr.Markdown("""
-                <div style="font-size: 14px;">
-                © 2025 Ho Yi Wan & Logan Hysen. All rights reserved.<br>
-                If you use Spatchat in research, please cite:<br>
-                <b>Wan, H.Y.</b> & <b>Hysen, L.</b> (2025). <i>Spatchat: Landscape Metrics.</i>
-                </div>
-                """)
-    
+    \"\"\")
+    gr.HTML(\"\"\"
+      <div style="font-size: 14px;">
+      © 2025 Ho Yi Wan & Logan Hysen. All rights reserved.<br>
+      If you use Spatchat in research, please cite:<br>
+      <b>Wan, H.Y.</b> & <b>Hysen, L.</b> (2025). <i>Spatchat: Landscape Metrics.</i>
+      </div>
+    \"\"\")
+
     with gr.Row():
         with gr.Column(scale=1):
-            file_input = gr.File(label="Upload GeoTIFF", type="filepath", file_types=[".tif",".tiff"])
+            file_input = gr.File(label="Upload GeoTIFF", type="filepath",
+                                  file_types=[".tif", ".tiff"])
             raster_out = gr.Plot(label="Raster Preview")
             clear_btn = gr.Button("Clear Raster")
         with gr.Column(scale=1):
-            chatbot = gr.Chatbot(value=initial_history, type="messages", label="Spatchat Dialog")
-            txt_in = gr.Textbox(placeholder="e.g. calculate edge density", lines=1)
+            chatbot = gr.Chatbot(value=initial_history, type="messages",
+                                 label="Spatchat Dialog")
+            txt_in = gr.Textbox(placeholder="e.g. calculate edge density",
+                                lines=1)
             clr_chat = gr.Button("Clear Chat")
 
     file_input.change(preview_raster, inputs=file_input, outputs=raster_out)
-    file_input.change(notify_upload, inputs=[file_input, chatbot], outputs=[chatbot, txt_in])
-    clear_btn.click(clear_raster, inputs=None, outputs=[file_input, raster_out])
-    txt_in.submit(analyze_raster, inputs=[file_input, txt_in, chatbot], outputs=[chatbot, txt_in])
+    file_input.change(notify_upload, inputs=[file_input, chatbot],
+                      outputs=[chatbot, txt_in])
+    clear_btn.click(clear_raster, inputs=None,
+                    outputs=[file_input, raster_out])
+    txt_in.submit(analyze_raster,
+                  inputs=[file_input, txt_in, chatbot],
+                  outputs=[chatbot, txt_in])
     clr_chat.click(lambda: initial_history, outputs=chatbot)
 
 iface.launch()
