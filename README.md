@@ -1,5 +1,5 @@
 ---
-title: Spatchat
+title: Spatchat Landmetrics
 emoji: 🌲
 colorFrom: green
 colorTo: blue
