@@ -6,7 +6,6 @@ import threading
 import random
 import sys
 
-import gradio as gr
 import rasterio
 import numpy as np
 import matplotlib.pyplot as plt
@@ -19,7 +18,7 @@ from huggingface_hub import InferenceClient
 from together import Together
 from together.error import RateLimitError, ServiceUnavailableError
 
-# --- LLM: HF primary, Together fallback (with pacing & robust parsing) ---
+# --- LLM: HF primary, Together fallback (router-only; no content surfaced) ---
 
 load_dotenv()
 
@@ -76,7 +75,7 @@ class UnifiedLLM:
     """
     Primary: Hugging Face (Serverless or Endpoint via HF_ENDPOINT_URL)
     Fallback: Together.ai (if TOGETHER_API_KEY set)
-    Returns plain string content.
+    Returns plain string content (JSON only; never surfaced directly to user).
     """
     def __init__(self):
         hf_model_or_url = (os.getenv("HF_ENDPOINT_URL") or HF_MODEL_DEFAULT).strip()
@@ -198,10 +197,20 @@ metric_definitions = {
     "cai":          ("Core Area Index (CAI)", "% core to area"),
 }
 
-# --- Synonyms ---
+# --- Synonyms (expanded; PLAND covers “percent landscape”, etc.) ---
 synonyms = {
     "edge_density": ["ed", "edge density"],
-    "pland":        ["pland", "proportion of landscape"],
+    "pland": [
+        "pland",
+        "proportion of landscape",
+        "percent landscape",
+        "% landscape",
+        "percent of landscape",
+        "area percent",
+        "area_percent",
+        "percent cover",
+        "percent composition"
+    ],
     "np":           ["np", "number of patches"],
     "pd":           ["pd", "patch density"],
     "lpi":          ["lpi", "largest patch index"],
@@ -219,7 +228,7 @@ metric_map = {
     "pd":           "patch_density",
     "lpi":          "largest_patch_index",
     "te":           "total_edge",
-    "edge_density":"edge_density",
+    "edge_density": "edge_density",
     "lsi":          "landscape_shape_index",
     "tca":          "total_core_area",
     "mesh":         "effective_mesh_size",
@@ -236,7 +245,7 @@ metric_map = {
     "nca":          "number_of_core_areas",
     "cai":          "core_area_index",
 }
-helper_methods = {k:v for k,v in metric_map.items() if v}
+helper_methods = {k: v for k, v in metric_map.items() if v}
 col_map = helper_methods.copy()
 class_only = {"pland","area","perim","para","shape","frac","enn","core","nca","cai"}
 cross_level = ["np","pd","lpi","te","edge_density"]
@@ -245,7 +254,7 @@ landscape_only = [
     if k not in class_only and k not in cross_level
 ]
 
-# --- Raster preview helpers ---
+# --- Raster preview helpers (used by UI) ---
 def no_raster_fig():
     fig, ax = plt.subplots(figsize=(5,5))
     ax.text(0.5,0.5,"🗂️ No raster loaded.",
@@ -278,14 +287,14 @@ def preview_raster(file):
     return fig
 
 def clear_raster():
-    return None, gr.update(value=no_raster_fig(), visible=True)
+    return None, no_raster_fig()
 
 def notify_upload(file, history):
     if file:
         return history + [{"role":"assistant","content":"📥 Raster uploaded successfully!"}], ""
     return history, ""
 
-# --- Core metric / metadata helpers ---
+# --- Core metric / metadata helpers (pylandstats-backed only) ---
 def answer_metadata(file):
     with rasterio.open(file.name) as src:
         return (
@@ -306,7 +315,7 @@ def list_metrics_text():
     lines = ["**Cross-level metrics:**"]
     lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in cross_level]
     lines.append("\n**Landscape-only:**")
-    lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in helper_methods]
+    lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in landscape_only]
     lines.append("\n**Class-only:**")
     lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in class_only]
     return "\n".join(lines)
@@ -336,6 +345,7 @@ def compute_landscape_only_text(file, keys):
             df = ls.compute_class_metrics_df(metrics=["number_of_patches"])
             val = int(df["number_of_patches"].sum())
         elif key in helper_methods:
+            # Some metrics are available as methods on Landscape
             val = getattr(ls, helper_methods[key])()
         else:
             df  = ls.compute_landscape_metrics_df(metrics=[col_map[key]])
@@ -365,7 +375,7 @@ def compute_multiple_metrics_text(file, keys):
         parts.append(compute_class_only_text(file, class_keys))
     return "\n\n".join(parts)
 
-# --- Tool wrappers ---
+# --- Tool wrappers (UI expects these) ---
 def run_metadata(file):
     return answer_metadata(file)
 
@@ -379,7 +389,7 @@ def run_compute_metrics(file, raw_metrics, level):
     # 1) normalize & map synonyms, catch unknowns
     mapped, unknown = [], []
     for m in raw_metrics:
-        ml = m.lower()
+        ml = str(m).lower()
         if ml in metric_definitions:
             cand = ml
         elif ml in reverse_synonyms:
@@ -392,7 +402,7 @@ def run_compute_metrics(file, raw_metrics, level):
         else:
             mapped.append(cand)
     if unknown:
-        return f"Sorry, I don’t recognize: {', '.join(unknown)}. Could you clarify?"
+        return f"Sorry, I don’t recognize: {', '.join(map(str, unknown))}. Could you clarify?"
 
     # split into cross-level vs class-only
     land = [c for c in mapped if c not in class_only]
@@ -413,31 +423,72 @@ def run_compute_metrics(file, raw_metrics, level):
     # else class-only
     return compute_class_only_text(file, mapped)
 
-# --- System & Fallback Prompts ---
+# --- Strict, JSON-only system prompt (router) ---
 SYSTEM_PROMPT = """
-You are Spatchat, a friendly GIS assistant and expert in landscape metrics using PyLandStats.
-Whenever the user asks for metadata (crs, resolution, extent, bands, nodata), reply _only_ with:
-{"tool":"metadata"}
-
-Whenever they ask “how many classes” or similar, reply:
-{"tool":"count_classes"}
-
-If they ask “list metrics” or “available metrics”, reply:
-{"tool":"list_metrics"}
-
-If they ask to compute metrics, reply exactly:
-{"tool":"compute_metrics","level":"landscape"|"class"|"both","metrics":[<codes>]}
-Do NOT invent numbers—your Python functions will compute them.
-If you see unknown codes, ask the user to clarify.
+You are a tool router. Output ONLY a single JSON object with this exact schema:
+{"tool":"metadata"|"count_classes"|"list_metrics"|"compute_metrics",
+ "level":"landscape"|"class"|"both",
+ "metrics":[<lowercase metric codes>]}
+Rules:
+- NEVER include any other text, Markdown, or numbers.
+- NEVER estimate or compute values.
+- If unsure, choose {"tool":"compute_metrics","level":"both","metrics":[]}.
 """.strip()
 
-FALLBACK_PROMPT = """
-You are Spatchat, a landscape-metrics expert.
-Keep replies under two sentences.
-If you can’t map a request to one of your tools, ask the user to clarify.
-""".strip()
+# --- Deterministic intent parser (covers PLAND/ED, etc.) ---
+LEVEL_HINTS = {
+    "class": re.compile(r"\bclass\b|\bby class\b|\bclass[-\s]*level\b"),
+    "landscape": re.compile(r"\blandscape\b|\boverall\b|\bwhole map\b|\blandscape[-\s]*level\b"),
+}
 
-# --- Main handler ---
+def parse_request_rule_based(user_msg: str):
+    """
+    Return (level, metrics) if we can confidently parse; else (None, []).
+    level in {"class","landscape","both"}
+    """
+    lower = user_msg.lower()
+
+    # Level
+    want_class = bool(LEVEL_HINTS["class"].search(lower))
+    want_land  = bool(LEVEL_HINTS["landscape"].search(lower))
+    if want_class and want_land:
+        level = "both"
+    elif want_class:
+        level = "class"
+    elif want_land:
+        level = "landscape"
+    else:
+        level = "both"  # default
+
+    # Metrics: phrase+token matches
+    found = set()
+    text = f" {lower} "
+    # phrase matches first (synonyms can contain spaces)
+    for canon, syns in synonyms.items():
+        for s in sorted(syns, key=len, reverse=True):
+            if f" {s} " in text:
+                found.add(canon)
+                break
+    # single-token canonical/synonym names
+    for tok in re.findall(r"[a-zA-Z_%]+", lower):
+        if tok in metric_definitions:
+            found.add(tok)
+        elif tok in reverse_synonyms:
+            found.add(reverse_synonyms[tok])
+
+    mapped = [m for m in found if metric_map.get(m) is not None]
+    return (level if mapped else None, mapped)
+
+# --- (Optional) extra guard against suspicious tables in replies ---
+def _looks_like_hallucinated_table(txt: str) -> bool:
+    suspicious = ["area_km2", "area percent", "percent landscape"]  # computed only under PLAND/class flow
+    # We allow "Proportion of Landscape (PLAND)" header in our own text; this just catches ad-hoc tables
+    return any(s in txt.lower() for s in suspicious) and ("| class" in txt.lower() or "\t" in txt)
+
+# --- Main handler used by UI ---
+initial_history = [{"role":"assistant","content":
+                   "👋 Hi! I’m Spatchat. Upload a GeoTIFF to begin—then ask for any landscape metric."}]
+
 def analyze_raster(file, user_msg, history):
     hist = history + [{"role":"user","content":user_msg}]
     lower = user_msg.lower()
@@ -450,63 +501,82 @@ def analyze_raster(file, user_msg, history):
     # shortcuts
     if re.search(r"\ball landscape(?: level)? metrics\b", lower):
         keys = [k for k in metric_map if metric_map.get(k) and k not in class_only]
-        return hist + [{"role":"assistant","content":compute_landscape_only_text(file, keys)}], ""
+        reply = compute_landscape_only_text(file, keys)
+        hist.append({"role":"assistant","content":reply})
+        return hist, ""
     if re.search(r"\ball class(?: level)? metrics\b", lower):
         keys = list(class_only)
-        return hist + [{"role":"assistant","content":compute_class_only_text(file, keys)}], ""
+        reply = compute_class_only_text(file, keys)
+        hist.append({"role":"assistant","content":reply})
+        return hist, ""
     if re.search(r"\ball metrics\b", lower):
         keys = [k for k in metric_map if metric_map.get(k)]
-        return hist + [{"role":"assistant","content":compute_multiple_metrics_text(file, keys)}], ""
+        reply = compute_multiple_metrics_text(file, keys)
+        hist.append({"role":"assistant","content":reply})
+        return hist, ""
 
-    # LLM tool chooser (HF primary, Together fallback)
+    # 1) Deterministic parser (no LLM)
+    lvl_rb, mets_rb = parse_request_rule_based(user_msg)
+    if lvl_rb is not None and mets_rb:
+        reply = run_compute_metrics(file, mets_rb, lvl_rb)
+        if _looks_like_hallucinated_table(reply):
+            reply = "Let’s specify the metric explicitly (e.g., `class: pland`)."
+        hist.append({"role":"assistant","content":reply})
+        return hist, ""
+
+    # 2) LLM router: MUST return strict JSON; NEVER surface its text
     resp = llm.chat(
         messages=[{"role":"system","content":SYSTEM_PROMPT}] + hist,
         temperature=0.0,
-        max_tokens=256,
+        max_tokens=128,
         stream=False
     )
 
+    # Reject any non-JSON or suspicious content outright
     try:
         call = json.loads(resp)
+        if not isinstance(call, dict):
+            raise ValueError("non-dict")
+        tool = call.get("tool")
+        if tool not in {"metadata","count_classes","list_metrics","compute_metrics"}:
+            raise ValueError("bad tool")
     except Exception:
-        conv = llm.chat(
-            messages=[{"role":"system","content":FALLBACK_PROMPT}] + hist,
-            temperature=0.7,
-            max_tokens=256,
-            stream=False
-        )
-        hist.append({"role":"assistant","content":conv})
+        hist.append({"role":"assistant","content":
+                     "Which metric and level would you like? For example: `class: pland` or `landscape: edge density`."})
         return hist, ""
 
-    tool = call.get("tool")
-    if tool=="metadata":
+    # Execute tools; NEVER echo LLM text
+    if tool == "metadata":
         reply = run_metadata(file)
-    elif tool=="count_classes":
+    elif tool == "count_classes":
         reply = run_count_classes(file)
-    elif tool=="list_metrics":
+    elif tool == "list_metrics":
         reply = run_list_metrics(file)
-    elif tool=="compute_metrics":
+    elif tool == "compute_metrics":
         raw_metrics = call.get("metrics", [])
         level       = call.get("level", "both")
-        # map & compute
         mapped, unknowns = [], []
-        for m in raw_metrics:
-            ml = m.lower()
+        for m in (raw_metrics or []):
+            ml = str(m).lower()
             if ml in metric_definitions:
                 mapped.append(ml)
             elif ml in reverse_synonyms:
                 mapped.append(reverse_synonyms[ml])
             else:
                 unknowns.append(m)
-        if unknowns:
-            reply = f"Sorry, I don’t recognize: {', '.join(unknowns)}. Could you clarify?"
+        if unknowns or not mapped:
+            reply = "I didn’t recognize those metrics. Try one of: pland, edge density, np, pd, lpi, te."
         else:
             reply = run_compute_metrics(file, mapped, level)
     else:
-        reply = "Sorry, I didn’t understand that. Could you clarify?"
+        reply = "I didn’t catch which metric you want. Try: `class: pland`."
+
+    if _looks_like_hallucinated_table(reply):
+        reply = "Let’s specify the metric explicitly (e.g., `class: pland`)."
 
     hist.append({"role":"assistant","content":reply})
     return hist, ""
+
 
 # --- UI setup & launch ---
 initial_history = [{"role":"assistant","content":
