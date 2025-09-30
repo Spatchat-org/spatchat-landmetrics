@@ -5,6 +5,7 @@ import time
 import threading
 import random
 import sys
+import gradio as gr
 
 import rasterio
 import numpy as np
@@ -287,7 +288,7 @@ def preview_raster(file):
     return fig
 
 def clear_raster():
-    return None, no_raster_fig()
+    return None, gr.update(value=no_raster_fig(), visible=True)
 
 def notify_upload(file, history):
     if file:
