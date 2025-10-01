@@ -1,3 +1,5 @@
+# app.py
+
 import os
 import re
 import json
@@ -173,87 +175,144 @@ class UnifiedLLM:
 
 llm = UnifiedLLM()
 
-# --- Metric glossary ---
+# --- Metric glossary (patch/class/landscape; acronyms only) ---
 metric_definitions = {
-    "pland":        ("Proportion of Landscape (PLAND)", "% of landscape by class"),
-    "np":           ("Number of Patches (NP)", "Total patches"),
-    "pd":           ("Patch Density (PD)", "Patches per 100 ha"),
-    "lpi":          ("Largest Patch Index (LPI)", "% landscape by largest patch"),
-    "te":           ("Total Edge (TE)", "Total edge length"),
-    "edge_density": ("Edge Density (ED)", "Edge length per hectare"),
-    "lsi":          ("Landscape Shape Index (LSI)", "Shape complexity"),
-    "tca":          ("Total Core Area (TCA)", "Sum core areas"),
-    "mesh":         ("Effective Mesh Size (MESH)", "Average patch size"),
-    "contag":       ("Contagion Index (CONTAG)", "Clumpiness"),
-    "shdi":         ("Shannon Diversity Index (SHDI)", "Diversity"),
-    "shei":         ("Shannon Evenness Index (SHEI)", "Evenness"),
-    "area":         ("Total Area (AREA)", "Patch area"),
-    "perim":        ("Total Perimeter (PERIM)", "Patch perimeter"),
-    "para":         ("Perimeter-Area Ratio (PARA)", "Perimeter/area"),
-    "shape":        ("Shape Index (SHAPE)", "Normalized shape"),
-    "frac":         ("Fractal Dimension (FRAC)", "Fractal complexity"),
-    "enn":          ("Euclidean Nearest Neighbor (ENN)", "Nearest patch distance"),
-    "core":         ("Total Core Area (CORE)", "Interior area"),
-    "nca":          ("Number of Core Areas (NCA)", "Count cores"),
-    "cai":          ("Core Area Index (CAI)", "% core to area"),
+    # Patch-level
+    "area":  ("Patch Area (AREA)", "Area of each patch"),
+    "perim": ("Patch Perimeter (PERIM)", "Perimeter of each patch"),
+    "para":  ("Perimeter–Area Ratio (PARA)", "p/a per patch"),
+    "shape": ("Shape Index (SHAPE)", "Normalized shape per patch"),
+    "frac":  ("Fractal Dimension (FRAC)", "Fractal complexity per patch"),
+    "enn":   ("Euclidean Nearest Neighbor (ENN)", "Nearest same-class patch"),
+    "core_p":("Core Area (CORE)", "Core area per patch"),
+    "ncore": ("Number of Core Areas (NCORE)", "Disjunct cores per patch"),
+    "cai":   ("Core Area Index (CAI)", "CORE / AREA per patch"),
+
+    # Class & Landscape (area/edge)
+    "ta":    ("Total Area (TA)", "Total area (class/landscape)"),
+    "pland": ("Proportion of Landscape (PLAND)", "% of landscape by class"),
+    "np":    ("Number of Patches (NP)", "Total patches"),
+    "pd":    ("Patch Density (PD)", "Patches per area"),
+    "lpi":   ("Largest Patch Index (LPI)", "% landscape by largest patch"),
+    "te":    ("Total Edge (TE)", "Total edge length"),
+    "edge_density": ("Edge Density (ED)", "Edge length per area unit"),
+
+    # Core family (class & landscape unless noted)
+    "tca":   ("Total Core Area (TCA)", "Sum of core areas"),
+    "cpland":("Core Area % of Landscape (CPLAND)", "% core area of landscape (per class)"),
+    "ndca":  ("Number of Disjunct Core Areas (NDCA)", "Count of disjunct cores"),
+    "dcad":  ("Disjunct Core Area Density (DCAD)", "Core areas per area unit"),
+
+    # Aggregation/connectivity (class & landscape)
+    "lsi":   ("Landscape Shape Index (LSI)", "Standardized edginess"),
+    "mesh":  ("Effective Mesh Size (MESH)", "Aggregation based on patch sizes"),
+
+    # Diversity / contagion (landscape-only)
+    "entropy":                    ("Entropy (H)", "Information-theoretic diversity"),
+    "joint_entropy":              ("Joint Entropy H(X,Y)", "Adjacency complexity"),
+    "conditional_entropy":        ("Conditional Entropy H(Y|X)", "Spatial complexity"),
+    "mutual_information":         ("Mutual Information (MI)", "Aggregation"),
+    "relative_mutual_information":("Relative Mutual Information (RMI)", "Normalized MI"),
+    "shdi":                       ("Shannon Diversity Index (SHDI)", "Diversity"),
+    "contag":                     ("Contagion (CONTAG)", "Aggregation of adjacencies"),
 }
 
-# --- Synonyms (expanded; PLAND covers “percent landscape”, etc.) ---
+# --- Synonyms (user text → canonical codes) ---
 synonyms = {
+    # Patch-level
+    "area":  ["area", "patch area", "area_patch", "area (patch)"],
+    "perim": ["perimeter", "perim", "patch perimeter"],
+    "para":  ["para", "perimeter-area ratio", "perimeter area ratio"],
+    "shape": ["shape", "shape index"],
+    "frac":  ["frac", "fractal dimension"],
+    "enn":   ["enn", "nearest neighbor", "nearest-neighbor"],
+    "core_p":["core", "core area", "core (patch)", "patch core"],
+    "ncore": ["ncore", "number of core areas", "num core areas"],
+    "cai":   ["cai", "core area index"],
+
+    # Class & landscape
+    "ta":    ["ta", "total area"],
+    "pland": ["pland", "proportion of landscape", "percent landscape", "% landscape",
+              "percent of landscape", "percent cover", "percent composition"],
+    "np":    ["np", "number of patches"],
+    "pd":    ["pd", "patch density"],
+    "lpi":   ["lpi", "largest patch index"],
+    "te":    ["te", "total edge"],
     "edge_density": ["ed", "edge density"],
-    "pland": [
-        "pland",
-        "proportion of landscape",
-        "percent landscape",
-        "% landscape",
-        "percent of landscape",
-        "area percent",
-        "area_percent",
-        "percent cover",
-        "percent composition"
-    ],
-    "np":           ["np", "number of patches"],
-    "pd":           ["pd", "patch density"],
-    "lpi":          ["lpi", "largest patch index"],
-    "te":           ["te", "total edge"],
+
+    # Core family (class/landscape)
+    "tca":   ["tca", "total core area"],
+    "cpland":["cpland", "core area proportion of landscape", "core area percent of landscape"],
+    "ndca":  ["ndca", "number of disjunct core areas"],
+    "dcad":  ["dcad", "disjunct core area density"],
+
+    # Aggregation/connectivity
+    "lsi":   ["lsi", "landscape shape index"],
+    "mesh":  ["mesh", "effective mesh size"],
+
+    # Diversity/contagion (landscape-only)
+    "entropy":                    ["entropy", "h"],
+    "joint_entropy":              ["joint entropy", "h(x,y)", "hxy", "joinent"],
+    "conditional_entropy":        ["conditional entropy", "h(y|x)", "hyx", "condent"],
+    "mutual_information":         ["mutual information", "mi", "mutinf"],
+    "relative_mutual_information":["relative mutual information", "rmi", "relmutinf"],
+    "shdi":                       ["shdi", "shannon diversity"],
+    "contag":                     ["contag", "contagion"],
 }
 reverse_synonyms = {}
 for code, syn_list in synonyms.items():
     for syn in syn_list:
         reverse_synonyms[syn.lower()] = code
 
-# --- Column mapping & helpers ---
+# --- Column/method mappings ---
+# Class/Landscape metrics (strings are PyLandStats method names)
 metric_map = {
-    "pland":        "proportion_of_landscape",
-    "np":           "number_of_patches",
-    "pd":           "patch_density",
-    "lpi":          "largest_patch_index",
-    "te":           "total_edge",
-    "edge_density": "edge_density",
-    "lsi":          "landscape_shape_index",
-    "tca":          "total_core_area",
-    "mesh":         "effective_mesh_size",
-    "contag":       "contagion",
-    "shdi":         "shannon_diversity_index",
-    "shei":         None,
-    "area":         "total_area",
-    "perim":        "perimeter",
-    "para":         "perimeter_area_ratio",
-    "shape":        "shape_index",
-    "frac":         "fractal_dimension",
-    "enn":          "euclidean_nearest_neighbor",
-    "core":         "total_core_area",
-    "nca":          "number_of_core_areas",
-    "cai":          "core_area_index",
+    "ta":           "total_area",
+    "pland":        "proportion_of_landscape",   # class only
+    "np":           "number_of_patches",         # cross
+    "pd":           "patch_density",             # cross
+    "lpi":          "largest_patch_index",       # cross
+    "te":           "total_edge",                # cross
+    "edge_density": "edge_density",              # cross
+    "tca":          "total_core_area",           # cross
+    "cpland":       "core_area_proportion_of_landscape",  # class only (derive landscape)
+    "ndca":         "number_of_disjunct_core_areas",      # cross
+    "dcad":         "disjunct_core_area_density",         # cross
+    "lsi":          "landscape_shape_index",     # cross
+    "mesh":         "effective_mesh_size",       # cross
+
+    # Landscape-only
+    "entropy":                    "entropy",
+    "joint_entropy":              "joint_entropy",
+    "conditional_entropy":        "conditional_entropy",
+    "mutual_information":         "mutual_information",
+    "relative_mutual_information":"relative_mutual_information",
+    "shdi":                       "shannon_diversity_index",
+    "contag":                     "contagion",
 }
-helper_methods = {k: v for k, v in metric_map.items() if v}
-col_map = helper_methods.copy()
-class_only = {"pland","area","perim","para","shape","frac","enn","core","nca","cai"}
-cross_level = ["np","pd","lpi","te","edge_density"]
-landscape_only = [
-    k for k in helper_methods
-    if k not in class_only and k not in cross_level
-]
+
+# Patch-level metrics are computed via compute_patch_metrics_df
+patch_metric_map = {
+    "area":  "area",
+    "perim": "perimeter",
+    "para":  "perimeter_area_ratio",
+    "shape": "shape_index",
+    "frac":  "fractal_dimension",
+    "enn":   "euclidean_nearest_neighbor",
+    "core_p":"core_area",
+    "ncore": "number_of_core_areas",
+    "cai":   "core_area_index",
+}
+
+# Helper (callable as attribute on Landscape for scalars)
+helper_methods = metric_map.copy()
+
+# Level partitions
+patch_only = set(patch_metric_map.keys())
+class_only = {"pland", "cpland"}           # strictly class by API (we derive CPLAND at landscape)
+cross_level = {"ta","np","pd","lpi","te","edge_density","tca","ndca","dcad","lsi","mesh"}
+landscape_only = {"entropy","joint_entropy","conditional_entropy",
+                  "mutual_information","relative_mutual_information","shdi","contag"}
 
 # --- Raster preview helpers (used by UI) ---
 def no_raster_fig():
@@ -313,12 +372,18 @@ def count_classes(file):
     return f"Your raster contains {len(vals)} unique classes."
 
 def list_metrics_text():
-    lines = ["**Cross-level metrics:**"]
-    lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in cross_level]
+    lines = []
+    lines.append("**Patch-level:**")
+    lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in sorted(patch_only)]
+
+    lines.append("\n**Class-level:**")
+    lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in sorted(class_only)]
+
+    lines.append("\n**Cross-level (class & landscape):**")
+    lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in sorted(cross_level)]
+
     lines.append("\n**Landscape-only:**")
-    lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in landscape_only]
-    lines.append("\n**Class-only:**")
-    lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in class_only]
+    lines += [f"- {metric_definitions[k][0]} (`{k}`)" for k in sorted(landscape_only)]
     return "\n".join(lines)
 
 def _build_landscape(file):
@@ -342,38 +407,64 @@ def compute_landscape_only_text(file, keys):
     parts = ["**Landscape-level metrics:**"]
     for key in keys:
         name,_ = metric_definitions[key]
-        if key=="np":
+        if key == "np":
             df = ls.compute_class_metrics_df(metrics=["number_of_patches"])
             val = int(df["number_of_patches"].sum())
+        elif key == "cpland":
+            # Derived: sum of class TCA divided by TA, in %
+            df = ls.compute_class_metrics_df(metrics=["total_core_area","total_area"])
+            tca_sum = float(df["total_core_area"].sum())
+            ta_sum  = float(df["total_area"].sum())
+            val = 0.0 if ta_sum == 0 else (100.0 * tca_sum / ta_sum)
         elif key in helper_methods:
-            # Some metrics are available as methods on Landscape
             val = getattr(ls, helper_methods[key])()
         else:
-            df  = ls.compute_landscape_metrics_df(metrics=[col_map[key]])
-            val = df[col_map[key]].iloc[0]
+            df  = ls.compute_landscape_metrics_df(metrics=[metric_map[key]])
+            val = df[metric_map[key]].iloc[0]
         parts.append(
             f"**{name} ({key.upper()}):** {val:.4f}"
-            if isinstance(val, float)
-            else f"**{name} ({key.upper()}):** {val}"
+            if isinstance(val, float) else f"**{name} ({key.upper()}):** {val}"
         )
     return "\n\n".join(parts)
 
 def compute_class_only_text(file, keys):
     ls   = _build_landscape(file)
-    cols = [col_map[k] for k in keys]
-    df   = ls.compute_class_metrics_df(metrics=cols).rename_axis("code").reset_index()
-    df["class_name"] = df["code"].astype(int).apply(lambda c: f"Class {c}")
-    tbl  = df[["class_name"] + cols].to_markdown(index=False)
+    cols = [metric_map[k] for k in keys]
+    df   = ls.compute_class_metrics_df(metrics=cols)
+    # Ensure class identifier column exists for display
+    if "class_val" not in df.columns:
+        df = df.rename_axis("class_val").reset_index()
+    else:
+        df = df.reset_index(drop=True)
+    df["class_name"] = df["class_val"].astype(int).apply(lambda c: f"Class {c}")
+    display_cols = ["class_name"] + [metric_map[k] for k in keys]
+    tbl  = df[display_cols].to_markdown(index=False)
     return f"**Class-level metrics:**\n{tbl}"
 
+def compute_patch_only_text(file, keys, row_cap=50):
+    ls   = _build_landscape(file)
+    cols = [patch_metric_map[k] for k in keys]
+    df   = ls.compute_patch_metrics_df(metrics=cols).reset_index()
+    total_rows = len(df)
+    if total_rows > row_cap:
+        df = df.head(row_cap)
+        note = f"\n\n_Showing first {row_cap} of {total_rows} patches._"
+    else:
+        note = ""
+    tbl  = df.to_markdown(index=False)
+    return f"**Patch-level metrics:**\n{tbl}{note}"
+
 def compute_multiple_metrics_text(file, keys):
-    land_keys  = [k for k in keys if k in cross_level or k in landscape_only]
+    land_keys  = [k for k in keys if (k in cross_level or k in landscape_only)]
     class_keys = [k for k in keys if k in class_only]
+    patch_keys = [k for k in keys if k in patch_only]
     parts = []
     if land_keys:
         parts.append(compute_landscape_only_text(file, land_keys))
     if class_keys:
         parts.append(compute_class_only_text(file, class_keys))
+    if patch_keys:
+        parts.append(compute_patch_only_text(file, patch_keys))
     return "\n\n".join(parts)
 
 # --- Tool wrappers (UI expects these) ---
@@ -398,37 +489,49 @@ def run_compute_metrics(file, raw_metrics, level):
         else:
             unknown.append(m)
             continue
-        if metric_map.get(cand) is None:
-            unknown.append(m)
-        else:
+
+        # If user explicitly asked for patch level and said "core", use patch variant
+        if level == "patch" and cand == "core":
+            cand = "core_p"
+
+        if (cand in metric_map) or (cand in patch_metric_map):
             mapped.append(cand)
+        else:
+            unknown.append(m)
+
     if unknown:
         return f"Sorry, I don’t recognize: {', '.join(map(str, unknown))}. Could you clarify?"
 
+    if level == "patch":
+        keys = [k for k in mapped if k in patch_only]
+        return compute_patch_only_text(file, keys) if keys else "No patch-level metrics requested."
+
     # split into cross-level vs class-only
-    land = [c for c in mapped if c not in class_only]
+    land = [c for c in mapped if (c in cross_level or c in landscape_only)]
     clas = [c for c in mapped if c in class_only]
-    any_cross = bool(set(mapped) & set(cross_level))
+    any_cross = bool(set(mapped) & cross_level)
 
     # explicit class request
     if level == "class":
-        return compute_class_only_text(file, mapped)
+        return compute_class_only_text(file, clas or [m for m in mapped if m in (class_only | cross_level)])
+
     # explicit landscape request
     if level == "landscape":
         if not land and clas:
             return compute_class_only_text(file, clas)
-        return compute_landscape_only_text(file, land)
-    # infer: cross-level -> both
+        return compute_landscape_only_text(file, land or [m for m in mapped if m in (cross_level | landscape_only)])
+
+    # infer / both
     if any_cross:
         return compute_multiple_metrics_text(file, mapped)
     # else class-only
-    return compute_class_only_text(file, mapped)
+    return compute_class_only_text(file, clas or mapped)
 
 # --- Strict, JSON-only system prompt (router) ---
 SYSTEM_PROMPT = """
 You are a tool router. Output ONLY a single JSON object with this exact schema:
 {"tool":"metadata"|"count_classes"|"list_metrics"|"compute_metrics",
- "level":"landscape"|"class"|"both",
+ "level":"landscape"|"class"|"patch"|"both",
  "metrics":[<lowercase metric codes>]}
 Rules:
 - NEVER include any other text, Markdown, or numbers.
@@ -440,20 +543,25 @@ Rules:
 LEVEL_HINTS = {
     "class": re.compile(r"\bclass\b|\bby class\b|\bclass[-\s]*level\b"),
     "landscape": re.compile(r"\blandscape\b|\boverall\b|\bwhole map\b|\blandscape[-\s]*level\b"),
+    "patch": re.compile(r"\bpatch\b|\bpatch[-\s]*level\b")
 }
 
 def parse_request_rule_based(user_msg: str):
     """
     Return (level, metrics) if we can confidently parse; else (None, []).
-    level in {"class","landscape","both"}
+    level in {"class","landscape","patch","both"}
     """
     lower = user_msg.lower()
 
     # Level
     want_class = bool(LEVEL_HINTS["class"].search(lower))
     want_land  = bool(LEVEL_HINTS["landscape"].search(lower))
-    if want_class and want_land:
+    want_patch = bool(LEVEL_HINTS["patch"].search(lower))
+
+    if sum([want_class, want_land, want_patch]) > 1:
         level = "both"
+    elif want_patch:
+        level = "patch"
     elif want_class:
         level = "class"
     elif want_land:
@@ -470,14 +578,25 @@ def parse_request_rule_based(user_msg: str):
             if f" {s} " in text:
                 found.add(canon)
                 break
-    # single-token canonical/synonym names
-    for tok in re.findall(r"[a-zA-Z_%]+", lower):
+    # single-token canonical/synonym names (allow parentheses and pipes)
+    for tok in re.findall(r"[a-zA-Z_%()|]+", lower):
         if tok in metric_definitions:
             found.add(tok)
         elif tok in reverse_synonyms:
             found.add(reverse_synonyms[tok])
 
-    mapped = [m for m in found if metric_map.get(m) is not None]
+    # resolve 'core' depending on requested level
+    mapped = []
+    for m in found:
+        if m == "core_p" or (m == "core" and level == "patch"):
+            mapped.append("core_p")
+        elif m == "core":
+            mapped.append("tca")  # class/landscape wording
+        else:
+            mapped.append(m)
+
+    # Keep only implementable codes
+    mapped = [m for m in mapped if (m in metric_map or m in patch_metric_map)]
     return (level if mapped else None, mapped)
 
 # --- (Optional) extra guard against suspicious tables in replies ---
@@ -486,9 +605,42 @@ def _looks_like_hallucinated_table(txt: str) -> bool:
     # We allow "Proportion of Landscape (PLAND)" header in our own text; this just catches ad-hoc tables
     return any(s in txt.lower() for s in suspicious) and ("| class" in txt.lower() or "\t" in txt)
 
+# --- Welcome message shown on load ---
+WELCOME_MESSAGE = """\
+👋 Hi! I’m Spatchat. I am an expert in quantifying landscape metrics.
+
+This is a list of metrics I can calculate:
+
+Patch level
+- Area/Edge: AREA, PERIM
+- Shape: PARA, SHAPE, FRAC
+- Core: CORE, NCORE, CAI
+- Aggregation: ENN
+
+Class level
+- Area/Edge: TA, PLAND, NP, PD, LPI, TE, ED
+- Core: TCA, CPLAND, NDCA, DCAD
+- Aggregation/Connectivity: LSI, MESH
+
+Landscape level
+- Area/Edge summaries: TA, NP, PD, LPI, TE, ED, LSI
+- Core summaries: TCA, CPLAND, NDCA, DCAD
+- Richness/Diversity: H (entropy), SHDI
+- Contagion/Interspersion: H(X,Y) (joint entropy), H(Y|X) (conditional entropy), MI (mutual information), RMI (relative MI), CONTAG
+
+You can ask me in natural language. For example:
+- "What is the percentage of landscape (PLAND) for class 1 at the class level?"
+- "Give me PLAND for all classes at the class level."
+- "What is Shannon’s diversity index (SHDI) at the landscape level?"
+- "Tell me the largest patch index (LPI) at the landscape level."
+- "Compute patch area (AREA) at the patch level."
+
+If I’m not sure what you mean, I’ll suggest close matches and ask you to confirm.
+Upload a GeoTIFF to begin — then ask me for any landscape metric.
+"""
+
 # --- Main handler used by UI ---
-initial_history = [{"role":"assistant","content":
-                   "👋 Hi! I’m Spatchat. Upload a GeoTIFF to begin—then ask for any landscape metric."}]
+initial_history = [{"role": "assistant", "content": WELCOME_MESSAGE}]
 
 def analyze_raster(file, user_msg, history):
     hist = history + [{"role":"user","content":user_msg}]
@@ -501,17 +653,25 @@ def analyze_raster(file, user_msg, history):
 
     # shortcuts
     if re.search(r"\ball landscape(?: level)? metrics\b", lower):
-        keys = [k for k in metric_map if metric_map.get(k) and k not in class_only]
+        keys = sorted((cross_level | landscape_only))
         reply = compute_landscape_only_text(file, keys)
         hist.append({"role":"assistant","content":reply})
         return hist, ""
+
     if re.search(r"\ball class(?: level)? metrics\b", lower):
-        keys = list(class_only)
+        keys = sorted(class_only | cross_level)  # everything meaningful at class level
         reply = compute_class_only_text(file, keys)
         hist.append({"role":"assistant","content":reply})
         return hist, ""
+
+    if re.search(r"\ball patch(?: level)? metrics\b", lower):
+        keys = sorted(patch_only)
+        reply = compute_patch_only_text(file, keys)
+        hist.append({"role":"assistant","content":reply})
+        return hist, ""
+
     if re.search(r"\ball metrics\b", lower):
-        keys = [k for k in metric_map if metric_map.get(k)]
+        keys = sorted(set(metric_map.keys()) | set(patch_metric_map.keys()))
         reply = compute_multiple_metrics_text(file, keys)
         hist.append({"role":"assistant","content":reply})
         return hist, ""
@@ -543,7 +703,7 @@ def analyze_raster(file, user_msg, history):
             raise ValueError("bad tool")
     except Exception:
         hist.append({"role":"assistant","content":
-                     "Which metric and level would you like? For example: `class: pland` or `landscape: edge density`."})
+                     "Which metric and level would you like? For example: `patch: area`, `class: pland`, or `landscape: edge density`."})
         return hist, ""
 
     # Execute tools; NEVER echo LLM text
@@ -566,7 +726,7 @@ def analyze_raster(file, user_msg, history):
             else:
                 unknowns.append(m)
         if unknowns or not mapped:
-            reply = "I didn’t recognize those metrics. Try one of: pland, edge density, np, pd, lpi, te."
+            reply = "I didn’t recognize those metrics. Try one of: area (patch), pland (class), edge density (landscape)."
         else:
             reply = run_compute_metrics(file, mapped, level)
     else:
@@ -577,7 +737,6 @@ def analyze_raster(file, user_msg, history):
 
     hist.append({"role":"assistant","content":reply})
     return hist, ""
-
 
 # --- UI setup & launch ---
 initial_history = [{"role":"assistant","content":
