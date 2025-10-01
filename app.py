@@ -642,39 +642,39 @@ Upload a GeoTIFF to begin — then ask me for any landscape metric.
 # --- Main handler used by UI ---
 
 def analyze_raster(file, user_msg, history):
-    keep = user_msg  # keep whatever the user typed in the box
+    clear = ""  # clear the textbox after submit
     hist = history + [{"role":"user","content":user_msg}]
     lower = user_msg.lower()
 
     if file is None:
         hist.append({"role":"assistant","content":
                      "Please upload a GeoTIFF before asking anything."})
-        return hist, keep
+        return hist, clear
 
     # shortcuts
     if re.search(r"\ball landscape(?: level)? metrics\b", lower):
         keys = sorted((cross_level | landscape_only))
         reply = compute_landscape_only_text(file, keys)
         hist.append({"role":"assistant","content":reply})
-        return hist, keep
+        return hist, clear
 
     if re.search(r"\ball class(?: level)? metrics\b", lower):
         keys = sorted(class_only | cross_level)
         reply = compute_class_only_text(file, keys)
         hist.append({"role":"assistant","content":reply})
-        return hist, keep
+        return hist, clear
 
     if re.search(r"\ball patch(?: level)? metrics\b", lower):
         keys = sorted(patch_only)
         reply = compute_patch_only_text(file, keys)
         hist.append({"role":"assistant","content":reply})
-        return hist, keep
+        return hist, clear
 
     if re.search(r"\ball metrics\b", lower):
         keys = sorted(set(metric_map.keys()) | set(patch_metric_map.keys()))
         reply = compute_multiple_metrics_text(file, keys)
         hist.append({"role":"assistant","content":reply})
-        return hist, keep
+        return hist, clear
 
     # 1) Deterministic parser (no LLM)
     lvl_rb, mets_rb = parse_request_rule_based(user_msg)
@@ -683,7 +683,7 @@ def analyze_raster(file, user_msg, history):
         if _looks_like_hallucinated_table(reply):
             reply = "Let’s specify the metric explicitly (e.g., `class: pland`)."
         hist.append({"role":"assistant","content":reply})
-        return hist, keep
+        return hist, clear
 
     # 2) LLM router
     resp = llm.chat(
@@ -703,7 +703,7 @@ def analyze_raster(file, user_msg, history):
     except Exception:
         hist.append({"role":"assistant","content":
                      "Which metric and level would you like? For example: `patch: area`, `class: pland`, or `landscape: edge density`."})
-        return hist, keep
+        return hist, clear
 
     if tool == "metadata":
         reply = run_metadata(file)
@@ -734,7 +734,7 @@ def analyze_raster(file, user_msg, history):
         reply = "Let’s specify the metric explicitly (e.g., `class: pland`)."
 
     hist.append({"role":"assistant","content":reply})
-    return hist, keep
+    return hist, clear
 
 # --- UI setup & launch ---
 
