@@ -233,7 +233,7 @@ synonyms = {
     # Class & landscape
     "ta":    ["ta", "total area"],
     "pland": ["pland", "proportion of landscape", "percent landscape", "% landscape",
-              "percent of landscape", "percent cover", "percent composition"],
+              "percent of landscape", "percent cover", "percentage landscape", "percent composition"],
     "np":    ["np", "number of patches"],
     "pd":    ["pd", "patch density"],
     "lpi":   ["lpi", "largest patch index"],
@@ -569,16 +569,23 @@ def parse_request_rule_based(user_msg: str):
     else:
         level = "both"  # default
 
-    # Metrics: phrase+token matches
     found = set()
     text = f" {lower} "
-    # phrase matches first (synonyms can contain spaces)
+
+    # 1) phrase matches (synonyms can contain spaces)
     for canon, syns in synonyms.items():
         for s in sorted(syns, key=len, reverse=True):
             if f" {s} " in text:
-                found.add(canon)
-                break
-    # single-token canonical/synonym names (allow parentheses and pipes)
+                found.add(canon); break
+
+    # 2) explicit metric codes inside parentheses, e.g. "(pland)"
+    for par in re.findall(r"\(([a-zA-Z_]+)\)", lower):
+        if par in metric_definitions:
+            found.add(par)
+        elif par in reverse_synonyms:
+            found.add(reverse_synonyms[par])
+
+    # 3) single-token canonical/synonym names (allow (), |)
     for tok in re.findall(r"[a-zA-Z_%()|]+", lower):
         if tok in metric_definitions:
             found.add(tok)
@@ -591,7 +598,7 @@ def parse_request_rule_based(user_msg: str):
         if m == "core_p" or (m == "core" and level == "patch"):
             mapped.append("core_p")
         elif m == "core":
-            mapped.append("tca")  # class/landscape wording
+            mapped.append("tca")
         else:
             mapped.append(m)
 
@@ -599,7 +606,7 @@ def parse_request_rule_based(user_msg: str):
     mapped = [m for m in mapped if (m in metric_map or m in patch_metric_map)]
     return (level if mapped else None, mapped)
 
-# --- (Optional) extra guard against suspicious tables in replies ---
+# --- extra guard against suspicious tables in replies ---
 def _looks_like_hallucinated_table(txt: str) -> bool:
     suspicious = ["area_km2", "area percent", "percent landscape"]  # computed only under PLAND/class flow
     # We allow "Proportion of Landscape (PLAND)" header in our own text; this just catches ad-hoc tables
