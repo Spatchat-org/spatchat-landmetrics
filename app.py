@@ -786,7 +786,6 @@ with gr.Blocks(title="Spatchat") as iface:
                                  label="Spatchat Dialog")
             txt_in = gr.Textbox(placeholder="e.g. calculate edge density",
                                 lines=1)
-            clr_chat = gr.Button("Clear Chat")
 
     # Enable queue (older-Gradio-safe signature)
     iface.queue(max_size=16)
@@ -799,6 +798,5 @@ with gr.Blocks(title="Spatchat") as iface:
     txt_in.submit(analyze_raster,
                   inputs=[file_input, txt_in, chatbot],
                   outputs=[chatbot, txt_in])
-    clr_chat.click(lambda: initial_history, outputs=chatbot)
 
 iface.launch(ssr_mode=False)
