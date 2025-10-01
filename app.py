@@ -640,7 +640,6 @@ Upload a GeoTIFF to begin — then ask me for any landscape metric.
 """
 
 # --- Main handler used by UI ---
-initial_history = [{"role": "assistant", "content": WELCOME_MESSAGE}]
 
 def analyze_raster(file, user_msg, history):
     hist = history + [{"role":"user","content":user_msg}]
@@ -739,8 +738,8 @@ def analyze_raster(file, user_msg, history):
     return hist, ""
 
 # --- UI setup & launch ---
-initial_history = [{"role":"assistant","content":
-                   "👋 Hi! I’m Spatchat. Upload a GeoTIFF to begin—then ask for any landscape metric."}]
+
+initial_history = [{"role": "assistant", "content": WELCOME_MESSAGE}]
 
 with gr.Blocks(title="Spatchat") as iface:
     gr.HTML('<head><link rel="icon" href="logo1.png"></head>')
