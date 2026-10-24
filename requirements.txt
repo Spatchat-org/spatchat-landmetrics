@@ -1,6 +1,6 @@
-gradio
+gradio==5.25.2
 matplotlib
 rasterio
 pylandstats
 python-dotenv
-together
+together>=1.2,<2

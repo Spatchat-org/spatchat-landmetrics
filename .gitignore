@@ -4,4 +4,5 @@ __pycache__/
 *.log
 .DS_Store
 .gradio/
-.ipynb_checkpoints
+.ipynb_checkpoints.venv/
+__pycache__/
