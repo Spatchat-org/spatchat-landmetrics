@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: src
+          lfs: true   # logos are stored with Git LFS; fetch the real files so the Space gets them
 
       - name: Push to Hugging Face
         env:
