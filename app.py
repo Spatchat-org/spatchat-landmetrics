@@ -6,6 +6,22 @@ from welcome import WELCOME_MESSAGE
 from raster_io import preview_raster, clear_raster, notify_upload, no_raster_fig
 from handlers import analyze_raster
 
+try:
+    from spatchat_gate import metered_chat
+except ImportError:  # launched without spatchat-gateway's client/ on PYTHONPATH
+    def metered_chat(**_kwargs):
+        return lambda fn: fn
+
+
+def _chat_denied(markdown, file, user_msg, history):
+    """Shown instead of an answer when the gateway refuses the message (limit reached, session expired)."""
+    hist = list(history or []) + [
+        {"role": "user", "content": str(user_msg or "")},
+        {"role": "assistant", "content": markdown},
+    ]
+    return hist, ""
+
+
 # --- UI setup & launch ---
 initial_history = [{"role": "assistant", "content": WELCOME_MESSAGE}]
 
@@ -47,7 +63,8 @@ with gr.Blocks(title="Spatchat: Landscape Metrics", head=spatchat_ui.HEAD) as if
                       outputs=[chatbot, txt_in])
     clear_btn.click(clear_raster, inputs=None,
                     outputs=[file_input, raster_out])
-    gr.on(triggers=[txt_in.submit, send_btn.click], fn=analyze_raster,
+    gr.on(triggers=[txt_in.submit, send_btn.click],
+          fn=metered_chat(room="landmetrics", message_index=1, deny=_chat_denied)(analyze_raster),
           inputs=[file_input, txt_in, chatbot],
           outputs=[chatbot, txt_in])
 
