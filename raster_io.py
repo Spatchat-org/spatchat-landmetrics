@@ -12,8 +12,8 @@ def _filepath(file):
 
 def no_raster_fig():
     fig, ax = plt.subplots(figsize=(5,5))
-    ax.text(0.5,0.5,"🗂️ No raster loaded.",
-            ha='center',va='center',color='gray',fontsize=14)
+    ax.text(0.5,0.5,"No raster loaded.\nUpload or drag a GeoTIFF here,\nor click 'Try sample data'.",
+            ha='center',va='center',color='gray',fontsize=12)
     ax.set_title("Raster Preview", color='dimgray')
     ax.axis('off')
     return fig
