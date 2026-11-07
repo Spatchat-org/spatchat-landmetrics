@@ -124,8 +124,11 @@ def _entries(sid):
         ext = os.path.splitext(path)[1].lower()
         return {".png": "Chart", ".csv": "Table"}.get(ext, "")
 
-    return (sfiles.scan(uploads, sfiles.UPLOADED, note_for=up_note),
-            sfiles.scan(outputs, sfiles.PRODUCED, note_for=out_note))
+    uploaded = sfiles.scan(uploads, sfiles.UPLOADED, note_for=up_note)
+    produced = sfiles.scan(outputs, sfiles.PRODUCED, note_for=out_note)
+    sfiles.stamp_sources(produced, os.path.join(SESSIONS_ROOT, sid, ".provenance.json"),
+                         os.path.basename(_active(sid) or ""))
+    return uploaded, produced
 
 
 def _views(sid, open_table=False):
