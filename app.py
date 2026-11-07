@@ -94,7 +94,6 @@ with gr.Blocks(title="Spatchat: Landscape Metrics", head=spatchat_ui.HEAD) as if
             file_input, txt_in, send_btn = spatchat_ui.composer(
                 gr, "e.g. calculate edge density", [".tif", ".tiff"]
             )
-            spatchat_ui.drop_hint(gr, "a land-cover GeoTIFF")
         with gr.Column(scale=5, min_width=0, elem_id="spatchat-mapcol"):
             with gr.Tabs(elem_id="spatchat-tabs"):
                 with gr.Tab("Raster", id="raster"):
