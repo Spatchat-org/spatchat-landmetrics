@@ -97,7 +97,7 @@ def raster_plots(file, out_dir=None) -> list:
             sizes.extend((np.bincount(lab.ravel())[1:] * xr * yr).tolist())
     if sizes:
         fig, ax = plt.subplots(figsize=(6.5, 4))
-        ax.hist(sizes, bins=min(40, max(5, len(sizes) // 3)), color="#1f7a4f", edgecolor="white")
+        ax.hist(sizes, bins=min(40, max(5, len(sizes) // 3)), color="#2563eb", edgecolor="white")
         if max(sizes) / max(min(sizes), 1e-9) > 50:
             ax.set_xscale("log")
         ax.set_xlabel("Patch area (map units²)")
@@ -149,12 +149,12 @@ def metric_plots_from_reply(text: str, out_dir=None) -> list:
     for col in num[:4]:
         fig, ax = plt.subplots(figsize=(6.5, 4))
         if label_col is not None and len(df) <= 40:
-            ax.bar(df[label_col].astype(str), df[col], color="#1f7a4f")
+            ax.bar(df[label_col].astype(str), df[col], color="#2563eb")
             plt.setp(ax.get_xticklabels(), rotation=30, ha="right")
             ax.set_ylabel(col)
             ax.set_title(f"{col} by {label_col}")
         else:
-            ax.hist(df[col].dropna(), bins=min(30, max(5, len(df) // 3)), color="#1f7a4f", edgecolor="white")
+            ax.hist(df[col].dropna(), bins=min(30, max(5, len(df) // 3)), color="#2563eb", edgecolor="white")
             ax.set_xlabel(col)
             ax.set_ylabel("Number of patches")
             ax.set_title(f"Distribution of {col}")
