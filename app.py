@@ -6,10 +6,11 @@ import uuid
 import gradio as gr
 import spatchat_ui
 import spatchat_files as sfiles
+import spatchat_layout
 from gradio.context import LocalContext
 
 from welcome import WELCOME_MESSAGE
-from raster_io import preview_raster, notify_upload, no_raster_fig
+from raster_io import notify_upload
 from handlers import analyze_raster
 from data_views import class_table, raster_plots, metric_plots_from_reply
 
@@ -94,7 +95,25 @@ def _chat_denied(markdown, file, user_msg, history):
     return hist, ""
 
 
-_SAMPLE_RASTER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dummy_lulc.tif")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_SAMPLE_DIR = os.path.join(_HERE, "sample_data")
+
+
+def _sample_raster() -> str:
+    """The demo land-cover raster, placed near Boulder, Colorado so it shows on the map.
+    Built on first use from the class pattern in dummy_lulc.tif."""
+    dst = os.path.join(_SAMPLE_DIR, "demo_landcover.tif")
+    if not os.path.exists(dst):
+        import rasterio
+        from rasterio.transform import from_origin
+
+        os.makedirs(_SAMPLE_DIR, exist_ok=True)
+        with rasterio.open(os.path.join(_HERE, "dummy_lulc.tif")) as src:
+            data, profile = src.read(1), src.profile.copy()
+        profile.update(crs="EPSG:32613", transform=from_origin(476000, 4437000, 30, 30), driver="GTiff")
+        with rasterio.open(dst, "w", **profile) as out:
+            out.write(data, 1)
+    return dst
 
 _EMPTY_SHEET = spatchat_ui.empty_state_html(
     "table", "No raster loaded",
@@ -159,11 +178,23 @@ def _build_outputs(file, sid):
         print("[landmetrics] could not summarise raster:", exc)
 
 
+def _message_text(message) -> str:
+    """Plain text of a chat message. Gradio 6 delivers content as a list of blocks, Gradio 5 as a string."""
+    content = message.get("content") if isinstance(message, dict) else message
+    if isinstance(content, str):
+        return content
+    if isinstance(content, (list, tuple)):
+        return "\n".join(
+            _message_text(part.get("text") if isinstance(part, dict) and "text" in part else part)
+            for part in content if part)
+    return "" if content is None else str(content)
+
+
 def _after_chat(history, sid):
     """Chart (and save) the table in the newest assistant reply."""
     last = next((m for m in reversed(history or []) if m.get("role") == "assistant"), None)
     if _active(sid) and last:
-        metric_plots_from_reply(str(last.get("content") or ""), _session(sid)[2])
+        metric_plots_from_reply(_message_text(last), _session(sid)[2])
 
 
 def _on_upload(file, sid):
@@ -175,14 +206,22 @@ def _on_upload(file, sid):
 
 
 def _on_sample(sid):
-    managed, sid = _adopt(_SAMPLE_RASTER, sid)
+    managed, sid = _adopt(_sample_raster(), sid)
     _ACTIVE[sid] = managed
     _build_outputs(managed, sid)
     return sid
 
 
-def _preview(sid):
-    return preview_raster(_active(sid))
+def _map_for(sid):
+    """Map tab: the active raster with its class legend, or the standard empty map."""
+    path = _active(sid)
+    if not path:
+        return spatchat_layout.empty_map("Drop a land-cover GeoTIFF here, or click + to start",
+                                         "Your raster appears on this map, with its classes in the legend.")
+    try:
+        return spatchat_layout.raster_map(path, label=os.path.basename(path))
+    except Exception as exc:  # no CRS, text labels, ...: explain instead of showing a blank map
+        return spatchat_layout.empty_map("This raster can't be shown on the map", str(exc)[:200])
 
 
 def _notify(sid, history):
@@ -205,7 +244,7 @@ def _files_remove(rows, paths, sid, history):
     removed, problems = sfiles.remove_paths(files_panel.ticked(rows, paths), [root])
     gone = {os.path.abspath(p) for p in removed}
     active = _active(sid)
-    preview, history = gr.skip(), list(history or [])
+    history = list(history or [])
     if (active and os.path.abspath(active) in gone) or (not active and sid in _ACTIVE):
         left = sfiles.scan(uploads, sfiles.UPLOADED)
         new_active = left[0]["path"] if left else None
@@ -214,14 +253,13 @@ def _files_remove(rows, paths, sid, history):
             _build_outputs(new_active, sid)
         else:
             _ACTIVE.pop(sid, None)
-        preview = preview_raster(new_active) if new_active else no_raster_fig()
         note = f"Now using **{os.path.basename(new_active)}**." if new_active else "No raster loaded."
         history.append({"role": "assistant", "content": f"{sfiles.removal_message(removed)}. {note}"})
     elif gone:
         history.append({"role": "assistant", "content": sfiles.removal_message(removed)})
     return (*files_panel.updates(gr, *_entries(sid), message=sfiles.removal_message(removed), problems=problems,
                                  reset_preview=bool(removed)),
-            preview, history, sid)
+            history, sid)
 
 
 def _files_download(rows, paths, sid):
@@ -240,30 +278,22 @@ _SUGGESTION_CHIPS = [
 ]
 
 with gr.Blocks(title="Spatchat: Landscape Metrics") as iface:
-    spatchat_ui.build_header(
+    ui = spatchat_layout.build(
         gr,
-        "Landscape Metrics",
-        "Upload a land-cover GeoTIFF and ask for landscape metrics in plain language.",
-        "landmetrics",
+        title="Landscape Metrics",
+        subtitle="Upload a land-cover GeoTIFF and ask for landscape metrics in plain language.",
+        room="landmetrics",
+        cite="Wan, H.Y. &amp; Hysen, L. (2025). <i>Spatchat: Landscape Metrics.</i>",
+        welcome=WELCOME_MESSAGE,
+        chips=_SUGGESTION_CHIPS,
+        placeholder="e.g. calculate edge density",
+        file_types=[".tif", ".tiff"],
+        map_html=_map_for(None),
+        plots_empty_html=_EMPTY_PLOTS,
     )
-
-    with gr.Row(elem_id="spatchat-workarea"):
-        with gr.Column(scale=3, min_width=0, elem_id="spatchat-sidebar"):
-            chatbot = gr.Chatbot(**spatchat_ui.chatbot_kwargs(gr, WELCOME_MESSAGE))
-            sample_btn = spatchat_ui.chip_row_with_sample(gr, _SUGGESTION_CHIPS)
-            # "+" uploads the GeoTIFF; it behaves like the old upload box.
-            file_input, txt_in, send_btn = spatchat_ui.composer(
-                gr, "e.g. calculate edge density", [".tif", ".tiff"]
-            )
-        with gr.Column(scale=5, min_width=0, elem_id="spatchat-mapcol"):
-            with gr.Tabs(elem_id="spatchat-tabs"):
-                with gr.Tab("Raster", id="raster"):
-                    raster_out = gr.Plot(value=no_raster_fig(), label="Raster Preview")
-                gallery, gallery_empty = spatchat_ui.plots_tab(gr, "Plots", _EMPTY_PLOTS)
-                files_panel = sfiles.build(gr)
-            session_state = gr.State(None)
-
-    spatchat_ui.build_footer(gr, "Wan, H.Y. &amp; Hysen, L. (2025). <i>Spatchat: Landscape Metrics.</i>")
+    chatbot, sample_btn, file_input, txt_in, send_btn = ui.chatbot, ui.sample_btn, ui.file_input, ui.user_input, ui.send_btn
+    gallery, gallery_empty, files_panel = ui.gallery, ui.gallery_empty, ui.files
+    session_state, map_out = ui.session_state, ui.map_out
 
     iface.queue(max_size=16)
     iface.unload(_cleanup_browser_session)
@@ -271,12 +301,12 @@ with gr.Blocks(title="Spatchat: Landscape Metrics") as iface:
     VIEW_OUTPUTS = [gallery, gallery_empty, *files_panel.outputs]
 
     file_input.upload(_on_upload, inputs=[file_input, session_state], outputs=session_state
-    ).then(_preview, inputs=session_state, outputs=raster_out
+    ).then(_map_for, inputs=session_state, outputs=map_out
     ).then(_notify, inputs=[session_state, chatbot], outputs=[chatbot, txt_in]
     ).then(_views_open, inputs=session_state, outputs=VIEW_OUTPUTS)
 
     sample_btn.click(_on_sample, inputs=session_state, outputs=session_state
-    ).then(_preview, inputs=session_state, outputs=raster_out
+    ).then(_map_for, inputs=session_state, outputs=map_out
     ).then(_notify, inputs=[session_state, chatbot], outputs=[chatbot, txt_in]
     ).then(_views_open, inputs=session_state, outputs=VIEW_OUTPUTS)
 
@@ -284,7 +314,8 @@ with gr.Blocks(title="Spatchat: Landscape Metrics") as iface:
     files_panel.remove_btn.click(
         _files_remove,
         inputs=[*files_panel.selections, session_state, chatbot],
-        outputs=[*files_panel.outputs, raster_out, chatbot, session_state],
+        outputs=[*files_panel.outputs, chatbot, session_state],
+    ).then(_map_for, inputs=session_state, outputs=map_out
     ).then(_views, inputs=session_state, outputs=VIEW_OUTPUTS, show_progress="hidden")
     files_panel.table.input(_files_download, inputs=[*files_panel.selections, session_state],
                             outputs=files_panel.download_btn, show_progress="hidden")

@@ -6,3 +6,6 @@ __pycache__/
 .gradio/
 .ipynb_checkpoints.venv/
 __pycache__/
+
+# built on first use by the app (binary files are rejected by Hugging Face)
+sample_data/*.tif

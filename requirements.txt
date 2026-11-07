@@ -4,3 +4,4 @@ rasterio
 pylandstats
 python-dotenv
 together>=1.2,<2
+folium>=0.16,<0.17
