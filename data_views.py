@@ -2,6 +2,7 @@
 """What the Datasheet and Plots tabs show for an uploaded land-cover raster."""
 import os
 import tempfile
+import time
 import uuid
 
 import numpy as np
@@ -67,11 +68,14 @@ def _out_dir():
     return d
 
 
-def raster_plots(file) -> list:
-    """Class composition bar chart and patch-size distribution. Returns PNG paths."""
+def raster_plots(file, out_dir=None) -> list:
+    """Class composition bar chart and patch-size distribution (plus the class table as CSV).
+    Returns the PNG paths."""
     arr, labels, (xr, yr), mask = _load_classes(file)
     table = class_table(file)
-    out = _out_dir()
+    out = out_dir or _out_dir()
+    os.makedirs(out, exist_ok=True)
+    table.to_csv(os.path.join(out, "class_summary.csv"), index=False)
     paths = []
 
     fig, ax = plt.subplots(figsize=(6.5, 4))
@@ -127,8 +131,9 @@ def _parse_markdown_table(text: str):
     return df
 
 
-def metric_plots_from_reply(text: str) -> list:
-    """Charts for a metrics table in a chat reply: bars per class, histograms for per-patch tables."""
+def metric_plots_from_reply(text: str, out_dir=None) -> list:
+    """Charts for a metrics table in a chat reply: bars per class, histograms for per-patch tables.
+    The table itself is saved as a CSV next to the charts."""
     df = _parse_markdown_table(text)
     if df is None or df.empty:
         return []
@@ -136,7 +141,10 @@ def metric_plots_from_reply(text: str) -> list:
     if not num:
         return []
     label_col = next((c for c in df.columns if c not in num), None)
-    out = _out_dir()
+    out = out_dir or _out_dir()
+    os.makedirs(out, exist_ok=True)
+    stamp = time.strftime("%H%M%S")
+    df.to_csv(os.path.join(out, f"metrics_{stamp}.csv"), index=False)
     paths = []
     for col in num[:4]:
         fig, ax = plt.subplots(figsize=(6.5, 4))
@@ -151,7 +159,7 @@ def metric_plots_from_reply(text: str) -> list:
             ax.set_ylabel("Number of patches")
             ax.set_title(f"Distribution of {col}")
         fig.tight_layout()
-        p = os.path.join(out, f"metric_{col}.png".replace("/", "_"))
+        p = os.path.join(out, f"metric_{stamp}_{col}.png".replace("/", "_"))
         fig.savefig(p, dpi=130)
         plt.close(fig)
         paths.append(p)
