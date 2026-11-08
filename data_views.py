@@ -23,21 +23,21 @@ def _load_classes(file):
     """Return (int class array, class labels dict, (x_res, y_res), nodata mask)."""
     path = _filepath(file)
     with rasterio.open(path) as src:
-        raw = src.read(1)
+        raw = src.read(1, masked=True)
         x_res, y_res = src.res
-        nodata = src.nodata if src.nodata is not None else 0
     if raw.dtype.kind in ("U", "S", "O"):
-        data = raw.astype(str)
-        names = np.unique(data[data != ""])
+        data = np.asarray(np.ma.getdata(raw)).astype(str)
+        mask = np.ma.getmaskarray(raw).copy()
+        mask |= data == ""
+        names = np.unique(data[~mask])
         arr = np.zeros(raw.shape, dtype=int)
         labels = {}
         for i, nm in enumerate(names, 1):
             arr[data == nm] = i
             labels[i] = str(nm)
-        mask = arr == 0
     else:
-        arr = raw
-        mask = arr == nodata
+        arr = np.asarray(np.ma.getdata(raw))
+        mask = np.ma.getmaskarray(raw).copy()
         if np.issubdtype(arr.dtype, np.floating):
             mask |= np.isnan(arr)
         labels = {int(v): f"Class {int(v)}" for v in np.unique(arr[~mask])}
