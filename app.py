@@ -1,6 +1,8 @@
 # app.py
 import os
 import shutil
+import threading
+import time
 import uuid
 
 import gradio as gr
@@ -28,6 +30,8 @@ SESSIONS_ROOT = "sessions"
 shutil.rmtree(SESSIONS_ROOT, ignore_errors=True)  # leftovers of a previous process belong to nobody
 os.makedirs(SESSIONS_ROOT, exist_ok=True)
 _HASH_TO_SID: dict[str, str] = {}
+_LAST_SEEN: dict[str, float] = {}
+_UNLOAD_GRACE_SECONDS = 15 * 60
 _ACTIVE: dict[str, str] = {}  # session id -> path of the raster the analyses run on
 
 
@@ -47,7 +51,13 @@ def _request_hash():
 
 def _session(sid):
     """(session id, uploads dir, outputs dir), created on first use."""
-    sid = (sid or "").strip() or uuid.uuid4().hex
+    sid = (sid or "").strip()
+    if not sid:
+        # an event that arrives before the new session id reached the browser joins the session this connection has
+        rh = _request_hash()
+        sid = _HASH_TO_SID.get(rh, "") if rh else ""
+    sid = sid or uuid.uuid4().hex
+    _LAST_SEEN[sid] = time.time()
     uploads = os.path.join(SESSIONS_ROOT, sid, "uploads")
     outputs = os.path.join(SESSIONS_ROOT, sid, "outputs")
     os.makedirs(uploads, exist_ok=True)
@@ -58,12 +68,22 @@ def _session(sid):
     return sid, uploads, outputs
 
 
+def _cleanup_if_still_idle(sid, closed_at):
+    if _LAST_SEEN.get(sid, 0.0) > closed_at:
+        return  # the visitor came back: the "close" was a dropped connection
+    _ACTIVE.pop(sid, None)
+    shutil.rmtree(os.path.join(SESSIONS_ROOT, sid), ignore_errors=True)
+
+
 def _cleanup_browser_session():
+    """Gradio says a tab closed. Behind proxies a dropped keep-alive looks the same, so only delete the data if
+    nothing touches the session for a while."""
     rh = _request_hash()
     sid = _HASH_TO_SID.pop(rh, None) if rh else None
     if sid:
-        _ACTIVE.pop(sid, None)
-        shutil.rmtree(os.path.join(SESSIONS_ROOT, sid), ignore_errors=True)
+        timer = threading.Timer(_UNLOAD_GRACE_SECONDS, _cleanup_if_still_idle, args=(sid, time.time()))
+        timer.daemon = True
+        timer.start()
 
 
 def _filepath(file):

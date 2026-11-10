@@ -14,6 +14,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from scipy import ndimage  # noqa: E402
 
+import spatchat_layout  # noqa: E402
+
 
 def _filepath(file):
     return getattr(file, "name", file)
@@ -108,6 +110,8 @@ def raster_plots(file, out_dir=None) -> list:
         fig.savefig(p, dpi=130)
         plt.close(fig)
         paths.append(p)
+    # the table itself, as a figure like the charts (written last so it is the newest and shows first)
+    paths.append(spatchat_layout.table_png(table, os.path.join(out, "class_summary_table.png"), "Land-cover classes"))
     return paths
 
 
@@ -163,4 +167,5 @@ def metric_plots_from_reply(text: str, out_dir=None) -> list:
         fig.savefig(p, dpi=130)
         plt.close(fig)
         paths.append(p)
+    paths.append(spatchat_layout.table_png(df, os.path.join(out, f"metrics_{stamp}_table.png"), "Landscape metrics"))
     return paths
