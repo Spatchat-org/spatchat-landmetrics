@@ -108,7 +108,8 @@ def run_compute_metrics(file, raw_metrics, level):
     any_cross = bool(set(mapped) & cross_level)
 
     if level == "class":
-        return compute_class_only_text(file, clas or [m for m in mapped if m in (class_only | cross_level)])
+        class_metrics = [m for m in mapped if m in (class_only | cross_level)]
+        return compute_class_only_text(file, class_metrics)
 
     if level == "landscape":
         if not land and clas:
