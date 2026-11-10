@@ -8,7 +8,7 @@ from together.error import RateLimitError, ServiceUnavailableError
 load_dotenv()
 
 HF_MODEL_DEFAULT = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-TOGETHER_MODEL_DEFAULT = "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free"
+TOGETHER_MODEL_DEFAULT = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 
 def _choice_content(choice):
     msg = getattr(choice, "message", None)
