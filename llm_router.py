@@ -86,7 +86,7 @@ class UnifiedLLM:
     def _hf_chat(self, messages, max_tokens=256, temperature=0.0, stream=False):
         tries, delay = 3, 2.2
         last_err = None
-        for _ in range(tries):
+        for attempt in range(tries):
             try:
                 if hasattr(self.hf_client, "chat_completion"):
                     resp = self.hf_client.chat_completion(
@@ -106,7 +106,10 @@ class UnifiedLLM:
                     )
             except Exception as e:
                 last_err = e
-                time.sleep(delay); delay *= 1.8
+                if attempt == tries - 1:
+                    break
+                time.sleep(delay)
+                delay *= 1.8
         raise last_err
 
     def chat(self, messages, temperature=0.0, max_tokens=256, stream=False):
