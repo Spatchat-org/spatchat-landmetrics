@@ -1,6 +1,7 @@
 # data_views.py
 """What the Datasheet and Plots tabs show for an uploaded land-cover raster."""
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -68,6 +69,15 @@ def _out_dir():
     d = os.path.join(tempfile.gettempdir(), "spatchat_landmetrics", uuid.uuid4().hex)
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def class_summary_csv(file, out_dir=None) -> str:
+    """The class table as CSV only (feeds the Datasheet); no charts."""
+    out = out_dir or _out_dir()
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, "class_summary.csv")
+    class_table(file).to_csv(path, index=False)
+    return path
 
 
 def raster_plots(file, out_dir=None) -> list:
@@ -140,7 +150,10 @@ def metric_plots_from_reply(text: str, out_dir=None) -> list:
     The table itself is saved as a CSV next to the charts."""
     df = _parse_markdown_table(text)
     if df is None or df.empty:
-        return []
+        df = _parse_scalar_metrics(text)
+        if df is None:
+            return []
+        return _scalar_metric_plots(df, out_dir)
     num = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and c not in ("class_val", "patch_id", "index")]
     if not num:
         return []
@@ -167,5 +180,36 @@ def metric_plots_from_reply(text: str, out_dir=None) -> list:
         fig.savefig(p, dpi=130)
         plt.close(fig)
         paths.append(p)
+    paths.append(spatchat_layout.table_png(df, os.path.join(out, f"metrics_{stamp}_table.png"), "Landscape metrics"))
+    return paths
+
+
+_SCALAR_RE = re.compile(r"^\*\*(?P<name>[^*]+?):\*\*\s*(?P<val>-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*$", re.M)
+
+
+def _parse_scalar_metrics(text: str):
+    """Landscape-level replies are lines like '**Edge Density (ED) (ED):** 12.3', not a table."""
+    rows = [(m["name"].strip(), float(m["val"])) for m in _SCALAR_RE.finditer(text)]
+    return pd.DataFrame(rows, columns=["metric", "value"]) if rows else None
+
+
+def _scalar_metric_plots(df, out_dir=None) -> list:
+    out = out_dir or _out_dir()
+    os.makedirs(out, exist_ok=True)
+    stamp = time.strftime("%H%M%S")
+    df.to_csv(os.path.join(out, f"metrics_{stamp}.csv"), index=False)
+    paths = []
+    fig, ax = plt.subplots(figsize=(6.5, 4))
+    ax.bar(df["metric"], df["value"], color="#fa6a98")
+    ax.set_ylabel("Value")
+    ax.set_title("Landscape metrics")
+    plt.setp(ax.get_xticklabels(), rotation=20, ha="right")
+    for i, v in enumerate(df["value"]):
+        ax.annotate(f"{v:g}", (i, v), ha="center", va="bottom", fontsize=9)
+    fig.tight_layout()
+    p = os.path.join(out, f"metric_{stamp}_landscape.png")
+    fig.savefig(p, dpi=130)
+    plt.close(fig)
+    paths.append(p)
     paths.append(spatchat_layout.table_png(df, os.path.join(out, f"metrics_{stamp}_table.png"), "Landscape metrics"))
     return paths

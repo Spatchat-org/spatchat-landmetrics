@@ -1,5 +1,6 @@
 # app.py
 import os
+import re
 import shutil
 import threading
 import time
@@ -14,7 +15,7 @@ from gradio.context import LocalContext
 from welcome import WELCOME_MESSAGE
 from raster_io import notify_upload
 from handlers import analyze_raster
-from data_views import class_table, raster_plots, metric_plots_from_reply
+from data_views import class_table, class_summary_csv, raster_plots, metric_plots_from_reply
 
 try:
     from spatchat_gate import metered_chat
@@ -142,7 +143,7 @@ _EMPTY_SHEET = spatchat_ui.empty_state_html(
 )
 _EMPTY_PLOTS = spatchat_ui.empty_state_html(
     "plot", "No plots yet",
-    "Load a land-cover raster and the class composition and patch-size charts will appear here.",
+    "Ask for a metric (for example &ldquo;edge density&rdquo;) or a plot, and the chart will appear here.",
 )
 
 
@@ -188,12 +189,12 @@ def _views_open(sid):
 
 
 def _build_outputs(file, sid):
-    """Charts and class table for a newly active raster, written to the visitor's outputs folder."""
+    """Class table (CSV only, for the Datasheet) for a newly active raster. No charts until the user asks."""
     if not file or not sid:
         return
     outputs = _session(sid)[2]
     try:
-        raster_plots(file, outputs)
+        class_summary_csv(file, outputs)
     except Exception as exc:
         print("[landmetrics] could not summarise raster:", exc)
 
@@ -210,11 +211,20 @@ def _message_text(message) -> str:
     return "" if content is None else str(content)
 
 
+_ASKED_FOR_PLOT = re.compile(r"(plots?|charts?|graphs?|histograms?|visuali[sz]e|visuali[sz]ation)", re.I)
+
+
 def _after_chat(history, sid):
-    """Chart (and save) the table in the newest assistant reply."""
+    """Chart (and save) the result in the newest assistant reply; class charts only if the user asked for a plot."""
     last = next((m for m in reversed(history or []) if m.get("role") == "assistant"), None)
     if _active(sid) and last:
-        metric_plots_from_reply(_message_text(last), _session(sid)[2])
+        made = metric_plots_from_reply(_message_text(last), _session(sid)[2])
+        user = next((m for m in reversed(history or []) if m.get("role") == "user"), None)
+        if not made and user and _ASKED_FOR_PLOT.search(_message_text(user)):
+            try:
+                raster_plots(_active(sid), _session(sid)[2])
+            except Exception as exc:
+                print("[landmetrics] could not plot raster:", exc)
 
 
 def _on_upload(file, sid):
