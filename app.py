@@ -1,5 +1,13 @@
 # app.py
 import os
+# Structured logging: the shared module comes from the gateway (skipped when this room runs on its own).
+try:
+    import spatchat_log
+
+    spatchat_log.setup("landmetrics")
+except Exception:
+    pass
+
 import re
 import shutil
 import threading
