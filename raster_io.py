@@ -23,17 +23,18 @@ def preview_raster(file):
         return no_raster_fig()
     path = _filepath(file)
     with rasterio.open(path) as src:
-        raw = src.read(1); nodata = src.nodata or 0
+        raw = src.read(1, masked=True)
     if raw.dtype.kind in ('U','S','O'):
-        data = raw.astype(str)
-        uniq = np.unique(data[data!=""])
+        data = np.asarray(np.ma.getdata(raw)).astype(str)
+        valid = ~np.ma.getmaskarray(raw) & (data != "")
+        uniq = np.unique(data[valid])
         arr  = np.zeros_like(raw,dtype=int)
         for i,nm in enumerate(uniq,1):
             arr[data==nm] = i
         labels = [f"{i}: {nm}" for i,nm in enumerate(uniq,1)]
     else:
         arr = raw
-        vals = np.unique(arr[arr!=nodata])
+        vals = np.unique(raw.compressed())
         labels = [f"Class {int(v)}" for v in vals]
     n = len(labels)
     colors = plt.cm.tab10(np.linspace(0,1,n))
@@ -65,8 +66,8 @@ def answer_metadata(file):
 def count_classes(file):
     path = _filepath(file)
     with rasterio.open(path) as src:
-        arr = src.read(1); nodata = src.nodata or 0
-    vals = np.unique(arr[arr!=nodata])
+        arr = src.read(1, masked=True)
+    vals = np.unique(arr.compressed())
     return f"Your raster contains {len(vals)} unique classes."
 
 def _build_landscape(file):
@@ -74,7 +75,7 @@ def _build_landscape(file):
     with rasterio.open(path) as src:
         raw = src.read(1)
         x_res,y_res = src.res
-        nodata = src.nodata or 0
+        nodata = src.nodata
     if raw.dtype.kind in ("U","S","O"):
         data_str   = raw.astype(str)
         uniq_names = np.unique(data_str[data_str!=""])
